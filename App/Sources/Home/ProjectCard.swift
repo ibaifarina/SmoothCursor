@@ -54,7 +54,7 @@ struct ProjectCard: View {
         ZStack {
             Rectangle().fill(Palette.surface)
             if let thumbnail {
-                Image(nsImage: thumbnail).resizable().scaledToFill()
+                Color.clear.overlay { Image(nsImage: thumbnail).resizable().scaledToFill() }.clipped()
             } else {
                 Image(systemName: "film").font(.system(size: 22)).foregroundStyle(Palette.textTertiary)
             }

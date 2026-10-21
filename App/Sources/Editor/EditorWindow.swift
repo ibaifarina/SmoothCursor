@@ -7,6 +7,8 @@ struct EditorWindow: View {
     @Environment(AppModel.self) private var app
     @State private var model: EditorModel
     @Environment(\.undoManager) private var undoManager
+    @Environment(\.dismiss) private var dismiss
+    @State private var isDuplicate = false
 
     init(packageURL: URL) {
         _model = State(initialValue: EditorModel(packageURL: packageURL))
@@ -24,15 +26,21 @@ struct EditorWindow: View {
         }
         .navigationTitle(model.project?.name ?? "")
         .task {
+            guard !isDuplicate else { return }
             model.cursorPacks = app.cursorPacks
             await model.load()
         }
         .onAppear {
             model.undoManager = undoManager
-            app.register(model)
+            if !app.register(model) {
+                // Already open in another window: close this one.
+                isDuplicate = true
+                dismiss()
+            }
         }
         .onChange(of: undoManager) { model.undoManager = undoManager }
         .onDisappear {
+            guard !isDuplicate else { return }
             app.unregister(model)
             Task {
                 await model.close()

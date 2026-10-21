@@ -87,6 +87,8 @@ Tip: steps 6 and 2 can run in parallel with others once step 3 exists.
 
 - [x] **Step 5b — Timeline & inspector UX.** Scrollable, zoomable timeline (pinch, ⌘± , fit; zooms around the playhead; follows the playhead while playing) with ruler scrubbing, Video (clips, trim handles, split, delete, removed regions hatched), Zoom (select, ⇧/⌘ multi-select, ⌘A, move, resize, snapping to playhead/edges with ⌥ to bypass, double-click to add, context menu, in/out ramps), Audio (waveform) and Camera lanes. Playback skips cuts; duration after cuts shown. Selected-zoom panel edits all selected zooms: level, follow / fixed (pick on canvas), dead zone, follow speed, easing, in/out durations. Edited auto zooms become manual so regenerating keeps them. Shortcuts: ⌫ delete, S split, Z add zoom, Esc deselect.
 
+- [x] **Step 6 — Backgrounds.** Color / Gradient / Image modes. Custom color picker (saturation-brightness square, hue, hex, eyedropper). Gradient editor: linear / radial / angular / mesh, draggable stops (click bar to add), reverse, angle, center; mesh 3×3 colors with Shuffle / Vivid. Images: macOS wallpapers, any image file, blurred frame of the recording; copied into the package as ≤4K JPEG; blur slider. Grain for all modes; shadow softness.
+
 ## Build
 
 ```bash

@@ -54,67 +54,7 @@ struct InspectorView: View {
     }
 }
 
-private struct BackgroundInspector: View {
-    @Bindable var model: EditorModel
-
-    private static let swatches: [RGBAColor] = [
-        .white, RGBAColor(hex: 0xF2F2F2), RGBAColor(hex: 0xD1D5DB), RGBAColor(hex: 0x9CA3AF),
-        RGBAColor(hex: 0x374151), .black, RGBAColor(hex: 0x60A5FA), RGBAColor(hex: 0x2563EB),
-        RGBAColor(hex: 0xF472B6), RGBAColor(hex: 0xF97316), RGBAColor(hex: 0xFACC15), RGBAColor(hex: 0x22C55E),
-        RGBAColor(hex: 0x14B8A6), RGBAColor(hex: 0xA855F7), RGBAColor(hex: 0xEC4899), RGBAColor(hex: 0x6366F1),
-    ]
-
-    private static let gradients: [GradientSpec] = [
-        .sunset,
-        GradientSpec(kind: .linear, stops: [.init(0, RGBAColor(hex: 0x4F46E5)), .init(1, RGBAColor(hex: 0x06B6D4))]),
-        GradientSpec(kind: .linear, stops: [.init(0, RGBAColor(hex: 0xF9A8D4)), .init(1, RGBAColor(hex: 0xFDE68A))], angle: 45),
-        GradientSpec(kind: .radial, stops: [.init(0, RGBAColor(hex: 0x1E293B)), .init(1, RGBAColor(hex: 0x020617))]),
-        GradientSpec(kind: .mesh, stops: [], meshColors: [
-            RGBAColor(hex: 0xA5F3FC), RGBAColor(hex: 0xC4B5FD), RGBAColor(hex: 0xFBCFE8),
-            RGBAColor(hex: 0x93C5FD), RGBAColor(hex: 0xE0E7FF), RGBAColor(hex: 0xFDE68A),
-            RGBAColor(hex: 0xBAE6FD), RGBAColor(hex: 0xFBCFE8), RGBAColor(hex: 0xFED7AA),
-        ]),
-        GradientSpec(kind: .linear, stops: [.init(0, RGBAColor(hex: 0x0F172A)), .init(1, RGBAColor(hex: 0x334155))], angle: 90),
-        GradientSpec(kind: .angular, stops: [
-            .init(0, RGBAColor(hex: 0xFF6A1F)), .init(0.5, RGBAColor(hex: 0xFF3D6E)), .init(1, RGBAColor(hex: 0xFF6A1F)),
-        ]),
-        GradientSpec(kind: .linear, stops: [.init(0, RGBAColor(hex: 0x22C55E)), .init(1, RGBAColor(hex: 0x14B8A6))], angle: 160),
-    ]
-
-    var body: some View {
-        let columns = Array(repeating: GridItem(.flexible(), spacing: 7), count: 4)
-        VStack(alignment: .leading, spacing: 12) {
-            SCSectionHeader("Gradients")
-            LazyVGrid(columns: columns, spacing: 7) {
-                ForEach(Self.gradients, id: \.self) { swatch(.gradient($0)) }
-            }
-            SCSectionHeader("Colors").padding(.top, 6)
-            LazyVGrid(columns: columns, spacing: 7) {
-                ForEach(Self.swatches, id: \.self) { swatch(.color($0)) }
-            }
-        }
-        VStack(alignment: .leading, spacing: 14) {
-            SCSectionHeader("Frame")
-            SCSlider(title: "Padding", value: model.binding(\.canvas.padding, "Change Padding"), in: 0...0.3, defaultValue: 0.08,
-                     format: { "\(Int($0 * 100))%" })
-            SCSlider(title: "Corner radius", value: model.binding(\.canvas.cornerRadius, "Change Corner Radius"), in: 0...60,
-                     defaultValue: 14, format: { "\(Int($0)) px" })
-            Toggle("Shadow", isOn: model.binding(\.canvas.shadow.enabled, "Toggle Shadow", coalesce: false))
-                .toggleStyle(.scSwitch)
-            SCSlider(title: "Shadow strength", value: model.binding(\.canvas.shadow.opacity, "Change Shadow"), in: 0...1,
-                     defaultValue: 0.45, format: { "\(Int($0 * 100))%" })
-                .disabled(!(model.project?.canvas.shadow.enabled ?? false))
-        }
-    }
-
-    private func swatch(_ background: Background) -> some View {
-        Swatch(background: background, selected: model.project?.canvas.background == background) {
-            model.update("Change Background") { $0.canvas.background = background }
-        }
-    }
-}
-
-private struct Swatch: View {
+struct Swatch: View {
     let background: Background
     let selected: Bool
     let action: () -> Void

@@ -38,6 +38,11 @@ case "1:1": project.canvas.aspect = .square
 case "4:5": project.canvas.aspect = .portrait4x5
 default: break
 }
+if let image = value("--image") {
+    let path = try BackgroundImages.importImage(URL(fileURLWithPath: image), into: FileManager.default.temporaryDirectory.appending(path: "sc-render-bg"))
+    project.canvas.background = .image(ImageBackground(source: .projectFile(relativePath: path), blur: Double(value("--blur") ?? "0") ?? 0))
+}
+if let g = value("--grain").flatMap(Double.init) { project.canvas.backgroundNoise = g }
 if let p = value("--padding").flatMap(Double.init) { project.canvas.padding = p }
 if let r = value("--radius").flatMap(Double.init) { project.canvas.cornerRadius = r }
 if let c = value("--crop").map(numbers), c.count == 4 { project.canvas.crop = UnitRect(x: c[0], y: c[1], width: c[2], height: c[3]) }
@@ -84,7 +89,11 @@ let layout = args.contains("--crop-mode")
 guard let context = MetalContext.shared else { print("no Metal"); exit(1) }
 let renderer = try OfflineRenderer(context: context)
 renderer.compositor.imageResolver = { source in
-    if case let .projectFile(path) = source { return package.appending(path: path) }
+    if case let .projectFile(path) = source {
+        return path.hasPrefix("media/background-") && !FileManager.default.fileExists(atPath: package.appending(path: path).path)
+            ? FileManager.default.temporaryDirectory.appending(path: "sc-render-bg").appending(path: path)
+            : package.appending(path: path)
+    }
     return nil
 }
 let source = try await VideoFrameReader.pixelBuffer(of: ProjectPackage.mediaURL(project.recording.videoFile, in: package), at: time)

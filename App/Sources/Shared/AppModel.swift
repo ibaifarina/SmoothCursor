@@ -23,12 +23,19 @@ final class AppModel {
 
     // MARK: Editors
 
-    func register(_ editor: EditorModel) {
-        editors[editor.packageURL.standardizedFileURL] = WeakEditor(model: editor)
+    /// Returns false if another window already edits this project (the caller should close itself:
+    /// two editors saving the same file would overwrite each other).
+    @discardableResult
+    func register(_ editor: EditorModel) -> Bool {
+        let key = editor.packageURL.standardizedFileURL
+        if let existing = editors[key]?.model, existing !== editor { return false }
+        editors[key] = WeakEditor(model: editor)
+        return true
     }
 
     func unregister(_ editor: EditorModel) {
-        editors[editor.packageURL.standardizedFileURL] = nil
+        let key = editor.packageURL.standardizedFileURL
+        if editors[key]?.model === editor { editors[key] = nil }
     }
 
     private func openEditor(for url: URL) -> EditorModel? {
