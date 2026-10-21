@@ -8,7 +8,8 @@ import UniformTypeIdentifiers
 
 // Usage: sc-render <package.smoothcursor> [--time S] [--height H] [--out file.png]
 //        [--background color|linear|radial|angular|mesh] [--aspect 16:9|9:16|1:1|4:5]
-//        [--zoom SCALE [--focus x,y]] [--crop x,y,w,h] [--padding P] [--radius R] [--crop-mode]
+//        [--zoom SCALE [--focus x,y|cursor]] [--crop x,y,w,h] [--padding P] [--radius R] [--crop-mode]
+//        [--cursor-scale S] [--pack builtin-white|builtin-dot] [--click ripple|pulse|press|none] [--no-cursor]
 let args = CommandLine.arguments
 func value(_ flag: String) -> String? { args.firstIndex(of: flag).flatMap { args.indices.contains($0 + 1) ? args[$0 + 1] : nil } }
 func numbers(_ s: String) -> [Double] { s.split(separator: ",").compactMap { Double($0) } }
@@ -41,9 +42,31 @@ if let p = value("--padding").flatMap(Double.init) { project.canvas.padding = p 
 if let r = value("--radius").flatMap(Double.init) { project.canvas.cornerRadius = r }
 if let c = value("--crop").map(numbers), c.count == 4 { project.canvas.crop = UnitRect(x: c[0], y: c[1], width: c[2], height: c[3]) }
 if let z = value("--zoom").flatMap(Double.init) {
-    let f = value("--focus").map(numbers) ?? [0.5, 0.5]
+    let focus: ZoomSegment.Focus = value("--focus") == "cursor"
+        ? .followCursor(deadZone: 0)
+        : .fixed({ let f = value("--focus").map(numbers) ?? [0.5, 0.5]; return UnitPoint2D(x: f[0], y: f[1]) }())
     project.zooms = [ZoomSegment(range: TimeRange(start: 0, end: project.recording.duration), scale: z,
-                                 focus: .fixed(UnitPoint2D(x: f[0], y: f[1])), transitionIn: 0, transitionOut: 0)]
+                                 focus: focus, transitionIn: 0, transitionOut: 0)]
+}
+if let c = value("--cursor-scale").flatMap(Double.init) { project.cursor.scale = c }
+if let e = value("--click").flatMap(CursorSettings.ClickEffect.init(rawValue:)) { project.cursor.clickEffect = e }
+if args.contains("--no-cursor") { project.cursor.visible = false }
+if let pack = value("--pack") { project.cursor.sprite = .customPack(id: pack) }
+
+var track: CursorTrack?
+if let file = project.recording.telemetryFile,
+   let telemetry = try? Telemetry(decoding: Data(contentsOf: package.appending(path: file))) {
+    var pack: CursorPack?
+    var packDir: URL?
+    if case let .customPack(id) = project.cursor.sprite {
+        let dir = await MainActor.run { CursorPackStore().directory(for: id) }
+        packDir = dir
+        pack = (try? Data(contentsOf: dir.appending(path: "pack.json"))).flatMap { try? JSONDecoder().decode(CursorPack.self, from: $0) }
+    }
+    let sprites = CursorSprites.resolve(header: telemetry.header, packageURL: package, pack: pack, packDirectory: packDir)
+    track = CursorTrack(telemetry: telemetry, settings: project.cursor, sprites: sprites, duration: project.recording.duration)
+    let clickTimes = telemetry.events.filter { $0.kind == .mouseDown }.map { String(format: "%.3f", $0.time) }
+    print("telemetry: \(telemetry.events.count) events, clicks at \(clickTimes)")
 }
 
 let height = Double(value("--height") ?? "1080") ?? 1080
@@ -51,7 +74,7 @@ let aspect = args.contains("--crop-mode") ? project.recording.pixelSize.aspect :
 let size = CGSize(width: (height * aspect).rounded(), height: height)
 let layout = args.contains("--crop-mode")
     ? FrameLayout.cropEditing(project: project, outputSize: size)
-    : FrameLayout.make(project: project, time: time, outputSize: size)
+    : FrameLayout.make(project: project, time: time, outputSize: size, cursor: track)
 
 guard let context = MetalContext.shared else { print("no Metal"); exit(1) }
 let renderer = try OfflineRenderer(context: context)

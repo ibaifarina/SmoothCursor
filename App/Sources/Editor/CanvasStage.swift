@@ -16,7 +16,10 @@ struct CanvasStage: View {
         GeometryReader { geo in
             let size = FrameLayout.fit(aspect: aspect, in: CGRect(origin: .zero, size: geo.size)).size
             ZStack {
-                MetalPreview(project: project, playback: model.playback, cropEditing: model.isCropping, packageURL: model.packageURL)
+                MetalPreview(
+                    project: project, playback: model.playback, cursorTrack: model.cursorTrack,
+                    cropEditing: model.isCropping, packageURL: model.packageURL
+                )
                 if model.isCropping {
                     CropOverlay(
                         crop: model.binding(\.canvas.crop, "Crop"),
@@ -46,6 +49,7 @@ struct CanvasStage: View {
 struct MetalPreview: NSViewRepresentable {
     let project: Project
     let playback: PlaybackController?
+    let cursorTrack: CursorTrack?
     let cropEditing: Bool
     let packageURL: URL
 
@@ -61,6 +65,7 @@ struct MetalPreview: NSViewRepresentable {
 
     func updateNSView(_ view: PreviewView, context: Context) {
         view.playback = playback
+        view.cursorTrack = cursorTrack
         view.cropEditing = cropEditing
         view.project = project
     }

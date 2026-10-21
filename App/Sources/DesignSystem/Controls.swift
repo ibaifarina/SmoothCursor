@@ -29,11 +29,11 @@ struct SCSegmented<Value: Hashable>: View {
                 } label: {
                     HStack(spacing: 5) {
                         if let icon = option.icon { Image(systemName: icon).font(.system(size: 11, weight: .semibold)) }
-                        if let title = option.title { Text(title) }
+                        if let title = option.title { Text(title).lineLimit(1).minimumScaleFactor(0.75) }
                     }
                     .font(Typo.label)
                     .foregroundStyle(selected ? Palette.text : Palette.textSecondary)
-                    .padding(.horizontal, 10)
+                    .padding(.horizontal, fill ? 4 : 10)
                     .frame(maxWidth: fill ? .infinity : nil, minHeight: 24)
                     .background {
                         if selected {

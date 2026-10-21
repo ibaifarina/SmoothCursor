@@ -81,6 +81,8 @@ Tip: steps 6 and 2 can run in parallel with others once step 3 exists.
 
 - [x] **Step 3 — Metal render core + preview player.** `FrameLayout` (resolution-independent layout: padding, aspect, crop, corner radius, shadow; zoom camera with fixed-point geometric interpolation, clamped to the recording), easing curves (cubic bezier solver, springs as normalized curves). `Compositor`: one render pass for background (color, linear/radial/angular/mesh gradients with dither, image + blur, grain), closed-form rounded-rect shadow, and the recording with SDF anti-aliased corners, trilinear mips when downscaling and bicubic when zoomed. `PreviewView` (CAMetalLayer + display link, idles at 0% CPU), `PlaybackController` (AVPlayer, frame-accurate chase seeking, scrub pause/resume), offline renderer + `swift run sc-render`. Editor: live preview, play/pause/frame step (Space, ←/→, ⇧←/→, Home/End), timeline scrubbing, crop editor with 8 handles and aspect lock.
 
+- [x] **Step 4 — Cursor system.** `CursorTrack`: spring-smoothed path precomputed at 240 Hz (smoothing amount → frequency, spring preset → damping), lookahead so the cursor doesn't lag, exact landing on clicks, idle hide that fades back in before movement, press shrink, motion tilt, slow camera path for follow-zoom. Cursor packs: captured macOS sprites, built-in vector "White" and "Dot", custom PNG import with hotspot picker (replace arrow / pointer / text / all). Renderer: linear premultiplied mipmapped sprites, ripple/pulse click effects. Zoom segments set to "follow cursor" now track it. Cursor inspector. (Click sound: with export, step 8.)
+
 ## Build
 
 ```bash

@@ -1,4 +1,5 @@
 import CoreGraphics
+import ImageIO
 import Metal
 import MetalPerformanceShaders
 import MetalKit
@@ -15,6 +16,9 @@ public final class Compositor {
     private let backgroundPipeline: MTLRenderPipelineState
     private let shadowPipeline: MTLRenderPipelineState
     private let screenPipeline: MTLRenderPipelineState
+    private let cursorPipeline: MTLRenderPipelineState
+    private let effectPipeline: MTLRenderPipelineState
+    private var cursorTextures: [URL: MTLTexture] = [:]
     private let sampler: MTLSamplerState
     private let placeholder: MTLTexture
     private var mipTexture: MTLTexture?
@@ -26,10 +30,10 @@ public final class Compositor {
         self.pixelFormat = pixelFormat
         let device = context.device
 
-        func pipeline(_ fragment: String, blended: Bool) throws -> MTLRenderPipelineState {
+        func pipeline(_ fragment: String, blended: Bool, vertex: String = "quad_vertex") throws -> MTLRenderPipelineState {
             let d = MTLRenderPipelineDescriptor()
             d.label = fragment
-            d.vertexFunction = context.library.makeFunction(name: "quad_vertex")
+            d.vertexFunction = context.library.makeFunction(name: vertex)
             d.fragmentFunction = context.library.makeFunction(name: fragment)
             let attachment = d.colorAttachments[0]!
             attachment.pixelFormat = pixelFormat
@@ -46,6 +50,8 @@ public final class Compositor {
         backgroundPipeline = try pipeline("background_fragment", blended: false)
         shadowPipeline = try pipeline("shadow_fragment", blended: true)
         screenPipeline = try pipeline("screen_fragment", blended: true)
+        cursorPipeline = try pipeline("cursor_fragment", blended: true, vertex: "corners_vertex")
+        effectPipeline = try pipeline("effect_fragment", blended: true)
 
         let s = MTLSamplerDescriptor()
         s.minFilter = .linear
@@ -131,7 +137,100 @@ public final class Compositor {
         encoder.setFragmentTexture(screenTexture, index: 0)
         encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
 
+        drawClickEffects(layout.clickEffects, encoder: encoder)
+        if let cursor = layout.cursor { drawCursor(cursor, encoder: encoder) }
+
         encoder.endEncoding()
+    }
+
+    // MARK: Cursor
+
+    private func drawClickEffects(_ effects: [FrameLayout.ClickEffect], encoder: MTLRenderCommandEncoder) {
+        guard !effects.isEmpty else { return }
+        encoder.setRenderPipelineState(effectPipeline)
+        for effect in effects {
+            let p = effect.progress
+            let eased = 1 - pow(1 - p, 3)
+            let radius: Double, thickness: Double, alpha: Double
+            switch effect.kind {
+            case .ripple:
+                radius = effect.maxRadius * (0.25 + 0.75 * eased)
+                thickness = max(effect.maxRadius * 0.16 * (1 - p), 0.6)
+                alpha = pow(1 - p, 1.4)
+            case .pulse:
+                radius = effect.maxRadius * 0.85 * eased
+                thickness = 0
+                alpha = 0.55 * pow(1 - p, 2)
+            }
+            let extent = radius + thickness + 4
+            var quad = SIMD4<Float>(Float(effect.center.x - extent), Float(effect.center.y - extent), Float(extent * 2), Float(extent * 2))
+            encoder.setVertexBytes(&quad, length: MemoryLayout<SIMD4<Float>>.stride, index: 1)
+            let c = effect.color
+            var uniforms: [SIMD4<Float>] = [
+                SIMD4(Float(effect.center.x), Float(effect.center.y), Float(radius), Float(thickness)),
+                SIMD4(Float(Self.linear(c.r)), Float(Self.linear(c.g)), Float(Self.linear(c.b)), Float(c.a * alpha)),
+            ]
+            encoder.setFragmentBytes(&uniforms, length: MemoryLayout<SIMD4<Float>>.stride * uniforms.count, index: 1)
+            encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+        }
+    }
+
+    private func drawCursor(_ cursor: FrameLayout.Cursor, encoder: MTLRenderCommandEncoder) {
+        guard let texture = cursorTexture(cursor.sprite.imageURL) else { return }
+        encoder.setRenderPipelineState(cursorPipeline)
+        encoder.setFragmentTexture(texture, index: 0)
+        encoder.setFragmentSamplerState(sampler, index: 0)
+
+        var corners = Self.cornerVectors(cursor.corners)
+        encoder.setVertexBytes(&corners, length: MemoryLayout<SIMD4<Float>>.stride * 2, index: 1)
+        var params = SIMD4<Float>(Float(cursor.opacity), 0, 0, 0)
+        encoder.setFragmentBytes(&params, length: MemoryLayout<SIMD4<Float>>.stride, index: 1)
+        encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+    }
+
+    private static func cornerVectors(_ c: [CGPoint]) -> [SIMD4<Float>] {
+        [SIMD4(Float(c[0].x), Float(c[0].y), Float(c[1].x), Float(c[1].y)),
+         SIMD4(Float(c[2].x), Float(c[2].y), Float(c[3].x), Float(c[3].y))]
+    }
+
+    private static func linear(_ v: Double) -> Double {
+        v <= 0.04045 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4)
+    }
+
+    /// Loads a cursor PNG as premultiplied *linear* half floats with mips: correct edges at any size
+    /// and no fringes in the blurred mip levels used for the shadow.
+    private func cursorTexture(_ url: URL) -> MTLTexture? {
+        if let cached = cursorTextures[url] { return cached }
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil),
+              let space = CGColorSpace(name: CGColorSpace.extendedLinearSRGB)
+        else { return nil }
+        let w = image.width, h = image.height
+        var floats = [Float](repeating: 0, count: w * h * 4)
+        let drawn: Bool = floats.withUnsafeMutableBytes { raw in
+            guard let ctx = CGContext(
+                data: raw.baseAddress, width: w, height: h, bitsPerComponent: 32, bytesPerRow: w * 16, space: space,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.floatComponents.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+            ) else { return false }
+            ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+            return true
+        }
+        guard drawn else { return nil }
+        let halves = floats.map { Float16($0) }
+        let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba16Float, width: w, height: h, mipmapped: true)
+        d.usage = [.shaderRead]
+        d.storageMode = .managed
+        guard let texture = context.device.makeTexture(descriptor: d) else { return nil }
+        halves.withUnsafeBytes {
+            texture.replace(region: MTLRegionMake2D(0, 0, w, h), mipmapLevel: 0, withBytes: $0.baseAddress!, bytesPerRow: w * 8)
+        }
+        if let buffer = context.queue.makeCommandBuffer(), let blit = buffer.makeBlitCommandEncoder() {
+            blit.generateMipmaps(for: texture)
+            blit.endEncoding()
+            buffer.commit()
+        }
+        cursorTextures[url] = texture
+        return texture
     }
 
     // MARK: Source filtering

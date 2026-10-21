@@ -23,7 +23,10 @@ struct EditorWindow: View {
             }
         }
         .navigationTitle(model.project?.name ?? "")
-        .task { await model.load() }
+        .task {
+            model.cursorPacks = app.cursorPacks
+            await model.load()
+        }
         .onAppear {
             model.undoManager = undoManager
             app.register(model)

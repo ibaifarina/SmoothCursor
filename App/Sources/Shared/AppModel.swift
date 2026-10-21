@@ -9,6 +9,7 @@ import SCProject
 final class AppModel {
     let library = ProjectLibrary()
     let permissions = PermissionCenter()
+    let cursorPacks = CursorPackStore()
     let recorder: RecordingController
     var lastError: String?
 

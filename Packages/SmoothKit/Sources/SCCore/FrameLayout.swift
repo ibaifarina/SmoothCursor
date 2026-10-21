@@ -18,6 +18,25 @@ public struct FrameLayout: Equatable, Sendable {
         public var opacity: Double
     }
 
+    /// The cursor sprite as a (possibly rotated) quad on the canvas.
+    public struct Cursor: Equatable, Sendable {
+        public var sprite: CursorTrack.Sprite
+        /// Top-left, top-right, bottom-left, bottom-right, canvas space.
+        public var corners: [CGPoint]
+        public var opacity: Double
+        /// Canvas units per point, for the soft drop shadow.
+        public var pointScale: Double
+    }
+
+    public struct ClickEffect: Equatable, Sendable {
+        public enum Kind: Sendable { case ripple, pulse }
+        public var kind: Kind
+        public var center: CGPoint
+        public var maxRadius: Double
+        public var progress: Double
+        public var color: RGBAColor
+    }
+
     public var outputSize: CGSize
     /// Where the (cropped) recording sits on the canvas.
     public var screenRect: CGRect
@@ -28,6 +47,8 @@ public struct FrameLayout: Equatable, Sendable {
     public var camera: Camera
     public var background: Background
     public var backgroundNoise: Double
+    public var cursor: Cursor?
+    public var clickEffects: [ClickEffect] = []
 
     /// Visible part of the canvas.
     public var visibleCanvasRect: CGRect {
@@ -53,7 +74,7 @@ public struct FrameLayout: Equatable, Sendable {
         min(size.width, size.height) / 1080
     }
 
-    public static func make(project: Project, time: Seconds, outputSize: CGSize, cursor: CGPoint? = nil) -> FrameLayout {
+    public static func make(project: Project, time: Seconds, outputSize: CGSize, cursor track: CursorTrack? = nil) -> FrameLayout {
         let canvas = project.canvas
         let ref = referenceScale(for: outputSize)
         let inset = min(outputSize.width, outputSize.height) * canvas.padding
@@ -69,8 +90,58 @@ public struct FrameLayout: Equatable, Sendable {
             sourceCrop: canvas.crop, camera: .identity, background: canvas.background,
             backgroundNoise: canvas.backgroundNoise
         )
-        layout.camera = ZoomCamera.camera(for: project, time: time, layout: layout, cursor: cursor)
+        let toCanvas = track.map { layout.mapping(targetSize: $0.targetSize) }
+        let cameraFocus: CGPoint? = if let toCanvas, let p = track?.cameraPosition(at: time) { toCanvas(p) } else { nil }
+        layout.camera = ZoomCamera.camera(for: project, time: time, layout: layout, cursor: cameraFocus)
+        if let track, let toCanvas {
+            layout.placeCursor(track: track, time: time, toCanvas: toCanvas, settings: project.cursor)
+        }
         return layout
+    }
+
+    /// Target points → canvas, through the crop.
+    func mapping(targetSize: CGSize) -> (CGPoint) -> CGPoint {
+        let screen = screenRect, crop = sourceCrop
+        return { p in
+            let u = CGPoint(x: p.x / max(targetSize.width, 1), y: p.y / max(targetSize.height, 1))
+            return CGPoint(
+                x: screen.minX + (u.x - crop.x) / crop.width * screen.width,
+                y: screen.minY + (u.y - crop.y) / crop.height * screen.height
+            )
+        }
+    }
+
+    mutating func placeCursor(track: CursorTrack, time: Seconds, toCanvas: (CGPoint) -> CGPoint, settings: CursorSettings) {
+        let unitsPerPoint = screenRect.width / max(track.targetSize.width * sourceCrop.width, 1)
+
+        clickEffects = track.activeClicks(at: time).map { click, progress in
+            ClickEffect(
+                kind: settings.clickEffect == .pulse ? .pulse : .ripple,
+                center: toCanvas(track.displayedPosition(at: click.time) ?? click.position),
+                maxRadius: 22 * settings.scale * unitsPerPoint,
+                progress: progress, color: settings.clickEffectColor
+            )
+        }
+
+        guard let state = track.state(at: time), let sprite = state.sprite, state.opacity > 0.001 else { return }
+        let hotspot = toCanvas(state.position)
+        // Hidden outside the cropped recording.
+        guard screenRect.insetBy(dx: -2, dy: -2).contains(hotspot) else { return }
+
+        let s = unitsPerPoint * settings.scale * state.pressScale
+        let origin = CGPoint(x: hotspot.x - sprite.hotspot.x * s, y: hotspot.y - sprite.hotspot.y * s)
+        let w = sprite.size.width * s, h = sprite.size.height * s
+        let c = cos(state.rotation), sn = sin(state.rotation)
+        func rotated(_ p: CGPoint) -> CGPoint {
+            let d = CGPoint(x: p.x - hotspot.x, y: p.y - hotspot.y)
+            return CGPoint(x: hotspot.x + d.x * c - d.y * sn, y: hotspot.y + d.x * sn + d.y * c)
+        }
+        cursor = Cursor(
+            sprite: sprite,
+            corners: [origin, CGPoint(x: origin.x + w, y: origin.y), CGPoint(x: origin.x, y: origin.y + h), CGPoint(x: origin.x + w, y: origin.y + h)].map(rotated),
+            opacity: state.opacity,
+            pointScale: unitsPerPoint * settings.scale
+        )
     }
 
     /// Crop editing: the whole uncropped recording, centered, on a plain dark canvas.

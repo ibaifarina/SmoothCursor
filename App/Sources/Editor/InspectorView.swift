@@ -137,33 +137,6 @@ private struct Swatch: View {
     }
 }
 
-private struct CursorInspector: View {
-    @Bindable var model: EditorModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            SCSectionHeader("Cursor")
-            Toggle("Show cursor", isOn: model.binding(\.cursor.visible, "Toggle Cursor", coalesce: false))
-                .toggleStyle(.scSwitch)
-            SCSlider(title: "Size", value: model.binding(\.cursor.scale, "Change Cursor Size"), in: 0.5...4, defaultValue: 1.5,
-                     format: { String(format: "%.1f×", $0) })
-            SCSlider(title: "Smoothing", value: model.binding(\.cursor.smoothingAmount, "Change Smoothing"), in: 0...1,
-                     defaultValue: 0.7, format: { "\(Int($0 * 100))%" })
-            Toggle("Hide when idle", isOn: model.binding(\.cursor.hideWhenIdle, "Toggle Idle Hide", coalesce: false))
-                .toggleStyle(.scSwitch)
-        }
-        VStack(alignment: .leading, spacing: 12) {
-            SCSectionHeader("Click effect")
-            SCSegmented(
-                selection: model.binding(\.cursor.clickEffect, "Change Click Effect", coalesce: false),
-                options: CursorSettings.ClickEffect.allCases.map { SCSegmentOption($0, $0.rawValue.capitalized) },
-                fill: true
-            )
-            Text("Cursor rendering arrives in step 4.").font(Typo.caption).foregroundStyle(Palette.textTertiary)
-        }
-    }
-}
-
 private struct ZoomInspector: View {
     @Bindable var model: EditorModel
 

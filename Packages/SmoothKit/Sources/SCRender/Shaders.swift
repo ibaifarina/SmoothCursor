@@ -216,4 +216,58 @@ fragment float4 screen_fragment(VOut in [[stage_in]],
     float3 rgb = s.params.y > 1.5 ? sample_catmull_rom(tex, smp, uv, s.params.zw) : tex.sample(smp, uv).rgb;
     return float4(rgb * alpha, alpha);
 }
+// MARK: - Cursor
+
+struct SpriteOut {
+    float4 position [[position]];
+    float2 uv;
+};
+
+// Quad from explicit corners (canvas): corners[0] = TL.xy, TR.xy; corners[1] = BL.xy, BR.xy.
+vertex SpriteOut corners_vertex(uint vid [[vertex_id]],
+                                constant FrameUniforms &frame [[buffer(0)]],
+                                constant float4 *corners [[buffer(1)]]) {
+    float2 c[4] = { corners[0].xy, corners[0].zw, corners[1].xy, corners[1].zw };
+    float2 uvs[4] = { float2(0, 0), float2(1, 0), float2(0, 1), float2(1, 1) };
+    float2 px = (c[vid] - frame.camera.xy) * frame.camera.z;
+    SpriteOut out;
+    out.position = float4(px.x / frame.sizes.x * 2.0 - 1.0, 1.0 - px.y / frame.sizes.y * 2.0, 0.0, 1.0);
+    out.uv = uvs[vid];
+    return out;
+}
+
+// Texture is premultiplied linear (rgba16Float). params: x opacity, y shadow mode, z shadow blur (mip bias), w shadow strength.
+fragment float4 cursor_fragment(SpriteOut in [[stage_in]],
+                                constant float4 &params [[buffer(1)]],
+                                texture2d<float> tex [[texture(0)]],
+                                sampler smp [[sampler(0)]]) {
+    if (params.y > 0.5) {
+        float a = tex.sample(smp, in.uv, bias(params.z)).a;
+        return float4(0.0, 0.0, 0.0, a * params.x * params.w);
+    }
+    return tex.sample(smp, in.uv) * params.x;
+}
+
+// MARK: - Click effects
+
+struct EffectUniforms {
+    float4 geometry; // xy center, z radius, w ring thickness (0 = filled disk)
+    float4 color;    // linear rgb, alpha
+};
+
+fragment float4 effect_fragment(VOut in [[stage_in]],
+                                constant FrameUniforms &frame [[buffer(0)]],
+                                constant EffectUniforms &e [[buffer(1)]]) {
+    float d = length(in.canvas - e.geometry.xy);
+    float px = 0.75 / frame.camera.z;
+    float coverage;
+    if (e.geometry.w > 0.0) {
+        float half_t = e.geometry.w * 0.5;
+        coverage = 1.0 - smoothstep(half_t - px, half_t + px, abs(d - e.geometry.z));
+    } else {
+        coverage = 1.0 - smoothstep(e.geometry.z - px, e.geometry.z + px, d);
+    }
+    float a = coverage * e.color.a;
+    return float4(e.color.rgb * a, a);
+}
 """#

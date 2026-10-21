@@ -35,6 +35,10 @@ final class EditorModel {
     var cropLock: CropLock = .free
     /// True while a text field is being edited, so single-key shortcuts (Space, arrows) stay out of the way.
     var isEditingText = false
+    /// Cursor motion and look, rebuilt whenever cursor settings or the cursor pack change.
+    private(set) var cursorTrack: CursorTrack?
+    private(set) var telemetry: Telemetry?
+    @ObservationIgnored var cursorPacks: CursorPackStore?
 
     @ObservationIgnored weak var undoManager: UndoManager?
     /// Consecutive edits with the same name inside this window become one undo step (slider drags).
@@ -56,7 +60,12 @@ final class EditorModel {
         do {
             let url = packageURL
             let loaded = try await Task.detached { try ProjectPackage.read(at: url) }.value
+            if let file = loaded.recording.telemetryFile {
+                let telemetryURL = url.appending(path: file)
+                telemetry = try? await Task.detached { try Telemetry(decoding: Data(contentsOf: telemetryURL)) }.value
+            }
             project = loaded
+            rebuildCursorTrack()
             playback = PlaybackController(
                 url: ProjectPackage.mediaURL(loaded.recording.videoFile, in: url),
                 duration: loaded.recording.duration, fps: loaded.recording.fps
@@ -64,6 +73,7 @@ final class EditorModel {
             #if DEBUG
             if ProcessInfo.processInfo.environment["SC_AUTOPLAY"] != nil { playback?.play() }
             if ProcessInfo.processInfo.environment["SC_CROP"] != nil { isCropping = true }
+            if let tab = ProcessInfo.processInfo.environment["SC_TAB"].flatMap(InspectorTab.init(rawValue:)) { inspectorTab = tab }
             #endif
             _ = await Thumbnailer.ensureThumbnail(for: url)
         } catch {
@@ -109,8 +119,23 @@ final class EditorModel {
         if let terminationObserver { NotificationCenter.default.removeObserver(terminationObserver) }
     }
 
+    /// Re-resolves sprites (e.g. after importing a pack) and re-simulates the cursor path.
+    func rebuildCursorTrack() {
+        guard let project, let telemetry else { cursorTrack = nil; return }
+        var pack: CursorPack?
+        var directory: URL?
+        if case let .customPack(id) = project.cursor.sprite, let store = cursorPacks {
+            pack = store.pack(id: id)
+            directory = store.directory(for: id)
+        }
+        let sprites = CursorSprites.resolve(header: telemetry.header, packageURL: packageURL, pack: pack, packDirectory: directory)
+        cursorTrack = CursorTrack(telemetry: telemetry, settings: project.cursor, sprites: sprites, duration: project.recording.duration)
+    }
+
     private func apply(_ next: Project, actionName: String, undoTo previous: Project?) {
+        let cursorChanged = project?.cursor != next.cursor
         project = next
+        if cursorChanged { rebuildCursorTrack() }
         autosaver.schedule(next)
         guard let previous, let undoManager else { return }
         undoManager.registerUndo(withTarget: self) { model in
