@@ -23,6 +23,7 @@ public final class Compositor {
     private let layerPipeline: MTLRenderPipelineState
     private let cursorAccumulatePipeline: MTLRenderPipelineState
     private var sceneTexture: MTLTexture?
+    private lazy var mockupRenderer: MockupRenderer? = try? MockupRenderer(context: context, targetFormat: pixelFormat)
     private var cursorLayer: MTLTexture?
     private var cursorTextures: [URL: MTLTexture] = [:]
     private let sampler: MTLSamplerState
@@ -91,8 +92,15 @@ public final class Compositor {
     /// video frame, so cached mip levels are rebuilt.
     public func encode(
         layout: FrameLayout, source: MTLTexture?, sourceChanged: Bool,
-        into target: MTLTexture, commandBuffer: MTLCommandBuffer, motion: MotionBlurFrame? = nil
+        into target: MTLTexture, commandBuffer: MTLCommandBuffer, motion: MotionBlurFrame? = nil, mockup: MockupFrame? = nil
     ) {
+        if let mockup, let renderer = mockupRenderer {
+            // Background only; the phone (with the recording on its screen) goes on top.
+            encodeScene(layout: layout, source: nil, sourceChanged: false, into: target, commandBuffer: commandBuffer,
+                        drawCursor: false, backgroundOnly: true)
+            renderer.encode(mockup, source: source, sourceChanged: sourceChanged, into: target, commandBuffer: commandBuffer, compositor: self)
+            return
+        }
         guard let motion, let scene = offscreen(&sceneTexture, like: target, format: target.pixelFormat) else {
             encodeScene(layout: layout, source: source, sourceChanged: sourceChanged, into: target, commandBuffer: commandBuffer, drawCursor: true)
             return
@@ -178,9 +186,9 @@ public final class Compositor {
         return cache
     }
 
-    private func encodeScene(
+    func encodeScene(
         layout: FrameLayout, source: MTLTexture?, sourceChanged: Bool,
-        into target: MTLTexture, commandBuffer: MTLCommandBuffer, drawCursor shouldDrawCursor: Bool
+        into target: MTLTexture, commandBuffer: MTLCommandBuffer, drawCursor shouldDrawCursor: Bool, backgroundOnly: Bool = false
     ) {
         let filter = filterMode(layout: layout, source: source)
         var screenTexture = source ?? placeholder
@@ -215,6 +223,10 @@ public final class Compositor {
         encoder.setFragmentTexture(background.image ?? placeholder, index: 0)
         encoder.setFragmentSamplerState(sampler, index: 0)
         encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+        if backgroundOnly {
+            encoder.endEncoding()
+            return
+        }
 
         // Shadow under the recording.
         let screen = layout.screenRect

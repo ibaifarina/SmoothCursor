@@ -291,22 +291,133 @@ struct AudioLane: View {
 }
 
 struct CameraLane: View {
-    let clips: [CameraClip]
+    @Bindable var model: EditorModel
+    let project: Project
     let metrics: TimelineMetrics
+    @State private var snapshot: [CameraClip]?
 
     var body: some View {
         ZStack(alignment: .topLeading) {
             LaneBackground()
                 .frame(width: metrics.x(metrics.duration) - metrics.x(0))
                 .offset(x: metrics.x(0))
-            ForEach(clips) { c in
-                Text(c.preset.label)
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.9))
-                    .frame(width: max(CGFloat(c.range.duration) * metrics.pps, 6), height: TimelineMetrics.cameraHeight)
-                    .background(Palette.trackCamera.opacity(0.45), in: .rect(cornerRadius: Radius.s))
-                    .offset(x: metrics.x(c.range.start))
+                .contentShape(.rect)
+                .onTapGesture(count: 2, coordinateSpace: .named(TimelineMetrics.space)) { p in
+                    if !project.mockup.isEnabled { model.setMockup(.phone) }
+                    model.addShot(at: metrics.time(p.x))
+                }
+                .onTapGesture(count: 1, coordinateSpace: .named(TimelineMetrics.space)) { p in
+                    model.clearSelection()
+                    model.playback?.seek(to: metrics.time(p.x))
+                }
+                .help(project.mockup.isEnabled ? "Double-click to add a camera shot" : "Camera shots move the 3D phone. Double-click to add one.")
+            ForEach(project.cameraClips) { clip in
+                let width = max(CGFloat(clip.range.duration) * metrics.pps, 8)
+                ShotBlock(clip: clip, selected: model.selectedShots.contains(clip.id), width: width, active: project.mockup.isEnabled)
+                    .frame(width: width, height: TimelineMetrics.cameraHeight)
+                    .contentShape(.rect)
+                    .onTapGesture(count: 2) { model.playback?.seek(to: clip.range.start) }
+                    .onTapGesture { model.select(shot: clip.id, extend: extendingSelection) }
+                    .gesture(moveGesture(clip))
+                    .pointerStyle(.grabIdle)
+                    .overlay(alignment: .leading) { handle(clip, .start) }
+                    .overlay(alignment: .trailing) { handle(clip, .end) }
+                    .contextMenu {
+                        ForEach(CameraPreset.allCases, id: \.self) { preset in
+                            Button(preset.label) {
+                                model.select(shot: clip.id)
+                                model.applyShot(preset)
+                            }
+                        }
+                        Divider()
+                        Button("Delete Shot", role: .destructive) {
+                            model.select(shot: clip.id)
+                            model.deleteSelection()
+                        }
+                    }
+                    .offset(x: metrics.x(clip.range.start))
             }
+        }
+    }
+
+    private func moveGesture(_ clip: CameraClip) -> some Gesture {
+        DragGesture(minimumDistance: 3, coordinateSpace: .named(TimelineMetrics.space))
+            .onChanged { g in
+                if snapshot == nil {
+                    snapshot = project.cameraClips
+                    if !model.selectedShots.contains(clip.id) { model.select(shot: clip.id, extend: extendingSelection) }
+                }
+                guard let snap = snapshot, let original = snap.first(where: { $0.id == clip.id }) else { return }
+                let ids = model.selectedShots
+                var delta = Double(g.translation.width / metrics.pps)
+                if !snappingDisabled {
+                    var candidates = snapCandidates(project: project, playhead: model.playheadTime)
+                    for c in snap where !ids.contains(c.id) { candidates += [c.range.start, c.range.end] }
+                    delta = Snapping.snapDelta(range: original.range, delta: delta, candidates: candidates, threshold: metrics.snapThreshold)
+                }
+                let moved = TimelineEdits.move(snap, ids: ids, by: delta, duration: metrics.duration)
+                model.update("Move Shot", coalesce: true) { $0.cameraClips = moved }
+            }
+            .onEnded { _ in snapshot = nil }
+    }
+
+    private func handle(_ clip: CameraClip, _ edge: TimelineEdits.Edge) -> some View {
+        Color.clear
+            .frame(width: 8)
+            .contentShape(.rect)
+            .pointerStyle(.frameResize(position: edge == .start ? .leading : .trailing))
+            .gesture(
+                DragGesture(minimumDistance: 1, coordinateSpace: .named(TimelineMetrics.space))
+                    .onChanged { g in
+                        if snapshot == nil {
+                            snapshot = project.cameraClips
+                            model.select(shot: clip.id)
+                        }
+                        guard let snap = snapshot, let original = snap.first(where: { $0.id == clip.id }) else { return }
+                        var t = (edge == .start ? original.range.start : original.range.end) + Double(g.translation.width / metrics.pps)
+                        if !snappingDisabled {
+                            var candidates = snapCandidates(project: project, playhead: model.playheadTime)
+                            for c in snap where c.id != clip.id { candidates += [c.range.start, c.range.end] }
+                            t = Snapping.snap(t, to: candidates, threshold: metrics.snapThreshold)
+                        }
+                        let resized = TimelineEdits.resize(snap, id: clip.id, edge: edge, to: t, duration: metrics.duration)
+                        model.update("Resize Shot", coalesce: true) { $0.cameraClips = resized }
+                    }
+                    .onEnded { _ in snapshot = nil }
+            )
+    }
+}
+
+private struct ShotBlock: View {
+    let clip: CameraClip
+    let selected: Bool
+    let width: CGFloat
+    let active: Bool
+
+    var body: some View {
+        let tint = Palette.trackCamera
+        HStack(spacing: 5) {
+            if width > 40 { Image(systemName: clip.preset.symbol).font(.system(size: 9, weight: .bold)) }
+            if width > 70 { Text(clip.preset.label).lineLimit(1) }
+        }
+        .font(.system(size: 10.5, weight: .semibold))
+        .foregroundStyle(.white.opacity(active ? 0.95 : 0.5))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(tint.opacity(selected ? 0.85 : active ? 0.5 : 0.22), in: .rect(cornerRadius: Radius.s))
+        .overlay(RoundedRectangle(cornerRadius: Radius.s).strokeBorder(selected ? Color.white : tint.opacity(active ? 0.95 : 0.4), lineWidth: selected ? 1.5 : 1))
+    }
+}
+
+extension CameraPreset {
+    var symbol: String {
+        switch self {
+        case .front: "rectangle.portrait"
+        case .hero: "rotate.3d"
+        case .straightOn: "dot.viewfinder"
+        case .orbitLeft: "arrow.counterclockwise"
+        case .orbitRight: "arrow.clockwise"
+        case .tiltUp: "arrow.up.and.down"
+        case .closeUp: "plus.magnifyingglass"
         }
     }
 }

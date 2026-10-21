@@ -1,12 +1,29 @@
 import Foundation
 
+/// Anything that sits on a timeline track as a time range (zooms, camera shots).
+public protocol TimelineItem: Identifiable where ID == UUID {
+    var range: TimeRange { get set }
+    /// Called after a user edit (zooms become manual so regenerating keeps them).
+    mutating func markEdited()
+}
+
+extension ZoomSegment: TimelineItem {
+    public mutating func markEdited() { origin = .manual }
+}
+
+extension CameraClip: TimelineItem {
+    public mutating func markEdited() {}
+}
+
+public typealias ZoomEdits = TimelineEdits
+
 /// Pure timeline editing operations, shared by the timeline UI and tests.
-public enum ZoomEdits {
+public enum TimelineEdits {
     public static let minDuration: Seconds = 0.4
 
     /// Moves the zooms in `ids` by `delta`, as a group, keeping them inside the recording.
     /// A single zoom also stops at its neighbours instead of overlapping them.
-    public static func move(_ zooms: [ZoomSegment], ids: Set<UUID>, by delta: Seconds, duration: Seconds) -> [ZoomSegment] {
+    public static func move<T: TimelineItem>(_ zooms: [T], ids: Set<UUID>, by delta: Seconds, duration: Seconds) -> [T] {
         let moving = zooms.filter { ids.contains($0.id) }
         guard let first = moving.map(\.range.start).min(), let last = moving.map(\.range.end).max() else { return zooms }
         var d = min(max(delta, -first), duration - last)
@@ -20,7 +37,7 @@ public enum ZoomEdits {
             guard ids.contains(z.id) else { return z }
             var m = z
             m.range = TimeRange(start: z.range.start + d, end: z.range.end + d)
-            m.origin = .manual
+            m.markEdited()
             return m
         }
     }
@@ -28,7 +45,7 @@ public enum ZoomEdits {
     public enum Edge: Sendable { case start, end }
 
     /// Drags one edge of a zoom to `time`, clamped to its neighbours and a minimum length.
-    public static func resize(_ zooms: [ZoomSegment], id: UUID, edge: Edge, to time: Seconds, duration: Seconds) -> [ZoomSegment] {
+    public static func resize<T: TimelineItem>(_ zooms: [T], id: UUID, edge: Edge, to time: Seconds, duration: Seconds) -> [T] {
         guard let z = zooms.first(where: { $0.id == id }) else { return zooms }
         let others = zooms.filter { $0.id != id }
         var range = z.range
@@ -44,31 +61,35 @@ public enum ZoomEdits {
             guard s.id == id else { return s }
             var m = s
             m.range = range
-            m.origin = .manual
+            m.markEdited()
             return m
         }
     }
 
     /// Applies `change` to every zoom in `ids` and marks them manual (so regenerating keeps them).
-    public static func update(_ zooms: [ZoomSegment], ids: Set<UUID>, _ change: (inout ZoomSegment) -> Void) -> [ZoomSegment] {
+    public static func update<T: TimelineItem>(_ zooms: [T], ids: Set<UUID>, _ change: (inout T) -> Void) -> [T] {
         zooms.map { z in
             guard ids.contains(z.id) else { return z }
             var m = z
             change(&m)
-            m.origin = .manual
+            m.markEdited()
             return m
         }
     }
 
-    /// A new zoom at `time`, sized to fit the free space around it. Nil if there's no room.
-    public static func insertion(at time: Seconds, in zooms: [ZoomSegment], duration: Seconds, length: Seconds = 2.5) -> ZoomSegment? {
-        guard !zooms.contains(where: { $0.range.contains(time) }) else { return nil }
-        let before = zooms.filter { $0.range.end <= time }.map(\.range.end).max() ?? 0
-        let after = zooms.filter { $0.range.start > time }.map(\.range.start).min() ?? duration
+    /// Free range of up to `length` starting at `time`, or nil if `time` is inside an item.
+    public static func freeRange<T: TimelineItem>(at time: Seconds, in items: [T], duration: Seconds, length: Seconds) -> TimeRange? {
+        guard !items.contains(where: { $0.range.contains(time) }) else { return nil }
+        let before = items.filter { $0.range.end <= time }.map(\.range.end).max() ?? 0
+        let after = items.filter { $0.range.start > time }.map(\.range.start).min() ?? duration
         let start = max(time, before)
         let end = min(start + length, after)
-        guard end - start >= minDuration else { return nil }
-        return ZoomSegment(range: TimeRange(start: start, end: end), origin: .manual)
+        return end - start >= minDuration ? TimeRange(start: start, end: end) : nil
+    }
+
+    /// A new zoom at `time`, sized to fit the free space around it. Nil if there's no room.
+    public static func insertion(at time: Seconds, in zooms: [ZoomSegment], duration: Seconds, length: Seconds = 2.5) -> ZoomSegment? {
+        freeRange(at: time, in: zooms, duration: duration, length: length).map { ZoomSegment(range: $0, origin: .manual) }
     }
 }
 

@@ -44,6 +44,7 @@ final class EditorModel {
 
     // Timeline
     var selectedZooms: Set<UUID> = []
+    var selectedShots: Set<UUID> = []
     var selectedClip: Int?
     /// Timeline magnification: 1 = whole recording fits the width.
     var timelineZoom = 1.0
@@ -76,10 +77,18 @@ final class EditorModel {
                 telemetry = try? await Task.detached { try Telemetry(decoding: Data(contentsOf: telemetryURL)) }.value
             }
             project = loaded
-            // First open of a recording: place zooms automatically (not an undoable edit).
-            if !loaded.autoZoomGenerated, let telemetry {
+            // First open: place zooms automatically, and put phone recordings into a 3D phone
+            // with ready-made camera shots (not undoable edits).
+            if !loaded.autoZoomGenerated {
                 var generated = loaded
-                AutoZoom.regenerate(&generated, telemetry: telemetry)
+                if let telemetry { AutoZoom.regenerate(&generated, telemetry: telemetry) }
+                generated.autoZoomGenerated = true
+                let phoneLike = [.iPhone, .simulator].contains(loaded.recording.sourceKind)
+                    || (loaded.recording.sourceKind == .imported && FrameLayout.croppedSourceAspect(loaded) < 0.8)
+                if phoneLike {
+                    generated.mockup.device = .phone
+                    generated.cameraClips = MockupCamera.autoShots(duration: generated.recording.duration, zooms: generated.zooms)
+                }
                 project = generated
                 autosaver.schedule(generated)
             }
@@ -186,6 +195,7 @@ final class EditorModel {
 
     func select(zoom id: UUID, extend: Bool = false) {
         selectedClip = nil
+        selectedShots = []
         if extend {
             if selectedZooms.contains(id) { selectedZooms.remove(id) } else { selectedZooms.insert(id) }
         } else {
@@ -202,6 +212,7 @@ final class EditorModel {
 
     func clearSelection() {
         selectedZooms = []
+        selectedShots = []
         selectedClip = nil
         isPickingFocus = false
     }
@@ -213,7 +224,11 @@ final class EditorModel {
     }
 
     func deleteSelection() {
-        if !selectedZooms.isEmpty {
+        if !selectedShots.isEmpty {
+            let ids = selectedShots
+            update(ids.count == 1 ? "Delete Shot" : "Delete Shots") { $0.cameraClips.removeAll { ids.contains($0.id) } }
+            selectedShots = []
+        } else if !selectedZooms.isEmpty {
             let ids = selectedZooms
             update(ids.count == 1 ? "Delete Zoom" : "Delete Zooms") { $0.zooms.removeAll { ids.contains($0.id) } }
             selectedZooms = []
@@ -221,6 +236,58 @@ final class EditorModel {
             update("Delete Clip") { $0.cuts = cuts }
             selectedClip = nil
         }
+    }
+
+    // MARK: Mockup
+
+    func select(shot id: UUID, extend: Bool = false) {
+        selectedClip = nil
+        selectedZooms = []
+        if extend {
+            if selectedShots.contains(id) { selectedShots.remove(id) } else { selectedShots.insert(id) }
+        } else {
+            selectedShots = [id]
+        }
+        inspectorTab = .mockup
+    }
+
+    func setMockup(_ device: MockupSettings.Device) {
+        update(device == .none ? "Remove Mockup" : "Add Phone Mockup") {
+            $0.mockup.device = device
+            if device != .none, $0.cameraClips.isEmpty {
+                $0.cameraClips = MockupCamera.autoShots(duration: $0.recording.duration, zooms: $0.zooms)
+            }
+        }
+    }
+
+    /// Rebuilds the shot list: close-ups on the zooms, varied wide shots in between.
+    func autoCamera() {
+        update("Auto Camera") { $0.cameraClips = MockupCamera.autoShots(duration: $0.recording.duration, zooms: $0.zooms) }
+        selectedShots = []
+    }
+
+    /// Changes the selected shots to `preset`, or adds a shot at the playhead if none is selected.
+    func applyShot(_ preset: CameraPreset) {
+        if !selectedShots.isEmpty {
+            let ids = selectedShots
+            update("Change Shot") { $0.cameraClips = TimelineEdits.update($0.cameraClips, ids: ids) { $0.preset = preset } }
+        } else {
+            addShot(preset, at: playheadTime)
+        }
+    }
+
+    func addShot(_ preset: CameraPreset = .hero, at time: Seconds) {
+        guard let project, let range = TimelineEdits.freeRange(at: time, in: project.cameraClips, duration: project.recording.duration, length: 4)
+        else { return }
+        let shot = CameraClip(range: range, preset: preset)
+        update("Add Shot") { $0.cameraClips.append(shot) }
+        select(shot: shot.id)
+    }
+
+    func updateSelectedShots(_ actionName: String, coalesce: Bool = false, _ change: @escaping (inout CameraClip) -> Void) {
+        let ids = selectedShots
+        guard !ids.isEmpty else { return }
+        update(actionName, coalesce: coalesce) { $0.cameraClips = TimelineEdits.update($0.cameraClips, ids: ids, change) }
     }
 
     /// Splits the video clip under the playhead.
@@ -255,6 +322,7 @@ final class EditorModel {
         if old?.cuts != next.cuts { syncPlaybackCuts() }
         // Drop selections that no longer exist (undo, delete).
         selectedZooms.formIntersection(next.zooms.map(\.id))
+        selectedShots.formIntersection(next.cameraClips.map(\.id))
         if let clip = selectedClip, clip >= Cuts.kept(next).count { selectedClip = nil }
         autosaver.schedule(next)
         guard let previous, let undoManager else { return }

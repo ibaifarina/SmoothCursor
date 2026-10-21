@@ -103,12 +103,20 @@ private struct TrackHeaders: View {
             .frame(height: TimelineMetrics.rulerHeight)
             .padding(.leading, 8)
             header("Video", "film", TimelineMetrics.videoHeight)
-            header("Zoom", "plus.magnifyingglass", TimelineMetrics.zoomHeight)
+            HStack(spacing: 6) {
+                header("Zoom", "plus.magnifyingglass", TimelineMetrics.zoomHeight)
+                    .opacity(model.project?.mockup.isEnabled == true ? 0.45 : 1)
+                if model.project?.mockup.isEnabled == true {
+                    SCBadge(text: "Off").help("Zooms are paused while the 3D phone is on")
+                }
+            }
             header("Audio", "waveform", TimelineMetrics.audioHeight)
             header("Camera", "video", TimelineMetrics.cameraHeight)
         }
         .padding(.top, 6)
         .frame(maxHeight: .infinity, alignment: .top)
+        .contentShape(.rect)
+        .onTapGesture { model.clearSelection() }
     }
 
     private func header(_ title: String, _ icon: String, _ height: CGFloat) -> some View {
@@ -135,13 +143,20 @@ private struct TimelineContent: View {
                 .frame(height: TimelineMetrics.videoHeight)
             ZoomLane(model: model, project: project, metrics: metrics)
                 .frame(height: TimelineMetrics.zoomHeight)
+                .opacity(project.mockup.isEnabled ? 0.3 : 1)
+                .allowsHitTesting(!project.mockup.isEnabled)
+                .help(project.mockup.isEnabled ? "Zooms are paused while the 3D phone is on" : "")
             AudioLane(peaks: model.waveform, kept: Cuts.kept(project), metrics: metrics)
                 .frame(height: TimelineMetrics.audioHeight)
-            CameraLane(clips: project.cameraClips, metrics: metrics)
+            CameraLane(model: model, project: project, metrics: metrics)
                 .frame(height: TimelineMetrics.cameraHeight)
         }
         .padding(.top, 6)
         .frame(maxHeight: .infinity, alignment: .top)
+        // Clicking anywhere empty (between and below tracks, the audio track) deselects.
+        .background {
+            Color.clear.contentShape(.rect).onTapGesture { model.clearSelection() }
+        }
         .overlay(alignment: .topLeading) {
             PlayheadLine()
                 .offset(x: metrics.x(playback.time) - 6)
@@ -268,3 +283,4 @@ func snapCandidates(project: Project, playhead: Seconds, excluding ids: Set<UUID
 
 var snappingDisabled: Bool { NSEvent.modifierFlags.contains(.option) }
 var extendingSelection: Bool { !NSEvent.modifierFlags.isDisjoint(with: [.shift, .command]) }
+

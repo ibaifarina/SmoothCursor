@@ -13,6 +13,14 @@ if let h = value("--height").flatMap(Int.init) { project.export.height = h }
 if let f = value("--fps").flatMap(Int.init) { project.export.fps = f }
 if args.contains("--gif") { project.export.format = .gif }
 if args.contains("--clicks") { project.cursor.clickSound = true }
+if let c = value("--crop")?.split(separator: ",").compactMap({ Double($0) }), c.count == 4 {
+    project.canvas.crop = UnitRect(x: c[0], y: c[1], width: c[2], height: c[3])
+}
+if args.contains("--mockup") { project.mockup.device = .phone }
+if args.contains("--aspect-wide") { project.canvas.aspect = .wide16x9 }
+if args.contains("--auto-camera") { project.cameraClips = MockupCamera.autoShots(duration: project.recording.duration, zooms: project.zooms) }
+if args.contains("--motion") { project.motionBlur.enabled = true; project.motionBlur.amount = 0.5 }
+for c in project.cameraClips { print(String(format: "shot %-11@ %5.2f–%5.2f", c.preset.label, c.range.start, c.range.end)) }
 
 var cursor: CursorTrack?
 if let file = project.recording.telemetryFile, let telemetry = try? Telemetry(decoding: Data(contentsOf: package.appending(path: file))) {

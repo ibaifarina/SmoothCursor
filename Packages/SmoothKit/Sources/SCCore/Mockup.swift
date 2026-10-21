@@ -1,18 +1,31 @@
 import Foundation
 
-/// 3D device mockup (step 9). Only phones for now.
+/// 3D device mockup. Only phones for now.
 public struct MockupSettings: Codable, Hashable, Sendable {
     public enum Device: String, Codable, CaseIterable, Sendable { case none, phone }
     public enum Finish: String, Codable, CaseIterable, Sendable { case black, silver, natural, desert, blue }
 
     public var device: Device = .none
     public var finish: Finish = .black
+    /// Lighting environment id (see `MockupEnvironment`).
     public var environment = "studio"
+    /// Degrees: rotates the reflections and the shadow around the phone.
     public var lightYaw = 150.0
+    /// Degrees: raises or lowers the light.
     public var lightPitch = 0.0
     public var lightStrength = 1.0
     public var shadowOpacity = 0.5
+    /// How strongly the screen glass reflects the environment.
+    public var screenReflection = 0.5
     public init() {}
+
+    public var isEnabled: Bool { device != .none }
+}
+
+public enum MockupEnvironment: String, CaseIterable, Sendable {
+    case studio, soft, sunset, neon, white
+
+    public var label: String { rawValue.capitalized }
 }
 
 public enum CameraPreset: String, Codable, CaseIterable, Sendable {
@@ -40,8 +53,11 @@ public struct CameraClip: Codable, Hashable, Identifiable, Sendable {
     public var intensity: Double
     public var easing: Easing
     public var transition: Seconds
+    /// Close-ups: point on the screen to frame (unit coordinates of the recording). Nil = upper middle.
+    public var focus: UnitPoint2D?
 
-    public init(range: TimeRange, preset: CameraPreset, intensity: Double = 0.5, easing: Easing = .default, transition: Seconds = 0.8) {
+    public init(range: TimeRange, preset: CameraPreset, intensity: Double = 0.5, easing: Easing = .default, transition: Seconds = 0.8, focus: UnitPoint2D? = nil) {
         self.range = range; self.preset = preset; self.intensity = intensity; self.easing = easing; self.transition = transition
+        self.focus = focus
     }
 }

@@ -323,4 +323,238 @@ fragment float4 layer_fragment(FullscreenOut in [[stage_in]],
                                sampler smp [[sampler(0)]]) {
     return layer.sample(smp, in.uv);
 }
+// MARK: - Mockup: environment
+
+constant float PI_F = 3.14159265358979;
+
+static float2 equirect_uv(float3 d) {
+    return float2(0.5 + atan2(d.x, -d.z) / (2.0 * PI_F), acos(clamp(d.y, -1.0, 1.0)) / PI_F);
+}
+
+static float3 equirect_dir(float2 uv) {
+    float phi = (uv.x - 0.5) * 2.0 * PI_F, theta = uv.y * PI_F;
+    return float3(sin(theta) * sin(phi), cos(theta), -sin(theta) * cos(phi));
+}
+
+static float2 hammersley(uint i, uint n) {
+    uint bits = (i << 16u) | (i >> 16u);
+    bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
+    bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);
+    bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);
+    bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
+    return float2(float(i) / float(n), float(bits) * 2.3283064365386963e-10);
+}
+
+// GGX importance-sampled prefilter (N = V = R), with filtered importance sampling to avoid fireflies.
+fragment float4 prefilter_fragment(FullscreenOut in [[stage_in]],
+                                   constant float4 &p [[buffer(0)]],
+                                   texture2d<float> src [[texture(0)]],
+                                   sampler smp [[sampler(0)]]) {
+    float roughness = p.x;
+    float3 N = equirect_dir(in.uv);
+    float a = roughness * roughness;
+    float3 up = abs(N.y) < 0.999 ? float3(0, 1, 0) : float3(1, 0, 0);
+    float3 T = normalize(cross(up, N)), B = cross(N, T);
+    float texelSolidAngle = 4.0 * PI_F / (p.y * p.z);
+    const uint count = 160;
+    float3 sum = 0.0;
+    float weight = 0.0;
+    for (uint i = 0; i < count; i++) {
+        float2 xi = hammersley(i, count);
+        float phi = 2.0 * PI_F * xi.x;
+        float cosTheta = sqrt((1.0 - xi.y) / (1.0 + (a * a - 1.0) * xi.y));
+        float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
+        float3 H = normalize(T * (sinTheta * cos(phi)) + B * (sinTheta * sin(phi)) + N * cosTheta);
+        float3 L = 2.0 * dot(N, H) * H - N;
+        float NoL = dot(N, L);
+        if (NoL <= 0.0) continue;
+        float NoH = saturate(dot(N, H));
+        float d = (NoH * NoH * (a * a - 1.0) + 1.0);
+        float D = a * a / (PI_F * d * d);
+        float pdf = D * 0.25 + 1e-4;
+        float lod = max(0.5 * log2((1.0 / (float(count) * pdf)) / texelSolidAngle) + 1.0, 0.0);
+        sum += src.sample(smp, equirect_uv(L), level(lod)).rgb * NoL;
+        weight += NoL;
+    }
+    return float4(sum / max(weight, 1e-4), 1.0);
+}
+
+// MARK: - Mockup: phone
+
+struct PhoneVertex {
+    float4 position; // w = material
+    float4 normal;
+    float4 uv;       // xy = model-space face coordinates (mm)
+};
+
+struct MockupUniforms {
+    float4x4 viewProj;
+    float4x4 model;
+    float4 cameraPos;
+    float4 env;        // x yaw, y pitch (rad), z strength, w max lod
+    float4 screen;     // x half w, y half h, z corner radius, w landscape
+    float4 island;     // x center y, y half w, z half h
+    float4 plateau;    // xy center, z size
+    float4 frameColor; // linear rgb, w roughness
+    float4 backColor;  // linear rgb, w roughness
+    float4 misc;       // x screen reflection, y floor y
+};
+
+struct PhoneOut {
+    float4 position [[position]];
+    float3 world;
+    float3 normal;
+    float2 face;
+    float material [[flat]];
+};
+
+vertex PhoneOut phone_vertex(uint vid [[vertex_id]],
+                             const device PhoneVertex *vertices [[buffer(0)]],
+                             constant MockupUniforms &u [[buffer(1)]]) {
+    PhoneVertex v = vertices[vid];
+    float4 world = u.model * float4(v.position.xyz, 1.0);
+    PhoneOut out;
+    out.position = u.viewProj * world;
+    out.world = world.xyz;
+    out.normal = (u.model * float4(v.normal.xyz, 0.0)).xyz;
+    out.face = v.uv.xy;
+    out.material = v.position.w;
+    return out;
+}
+
+static float3 rotate_env(float3 d, float yaw, float pitch) {
+    float cp = cos(-pitch), sp = sin(-pitch);
+    d = float3(d.x, d.y * cp - d.z * sp, d.y * sp + d.z * cp);
+    float cy = cos(-yaw), sy = sin(-yaw);
+    return float3(d.x * cy + d.z * sy, d.y, -d.x * sy + d.z * cy);
+}
+
+static float3 sample_env(texture2d<float> env, sampler smp, constant MockupUniforms &u, float3 dir, float roughness) {
+    float3 d = rotate_env(normalize(dir), u.env.x, u.env.y);
+    return env.sample(smp, equirect_uv(d), level(roughness * u.env.w)).rgb * u.env.z;
+}
+
+// Karis' analytic approximation of the split-sum BRDF lookup.
+static float2 env_brdf(float roughness, float NoV) {
+    const float4 c0 = float4(-1.0, -0.0275, -0.572, 0.022);
+    const float4 c1 = float4(1.0, 0.0425, 1.04, -0.04);
+    float4 r = roughness * c0 + c1;
+    float a004 = min(r.x * r.x, exp2(-9.28 * NoV)) * r.x + r.y;
+    return float2(-1.04, 1.04) * a004 + r.zw;
+}
+
+static float3 aces(float3 x) {
+    return saturate(x * (2.51 * x + 0.03) / (x * (2.43 * x + 0.59) + 0.14));
+}
+
+static float3 shade(float3 N, float3 V, float3 albedo, float metallic, float roughness,
+                    texture2d<float> env, sampler smp, constant MockupUniforms &u, thread float3 &specularOut) {
+    float NoV = saturate(dot(N, V));
+    float3 F0 = mix(float3(0.04), albedo, metallic);
+    float2 ab = env_brdf(roughness, NoV);
+    float3 specular = sample_env(env, smp, u, reflect(-V, N), roughness) * (F0 * ab.x + ab.y);
+    float3 diffuse = sample_env(env, smp, u, N, 1.0) * albedo * (1.0 - metallic);
+    specularOut = specular;
+    return diffuse + specular;
+}
+
+static float coverage(float d) {
+    float w = max(fwidth(d), 1e-4);
+    return 1.0 - smoothstep(-w, w, d);
+}
+
+fragment float4 phone_fragment(PhoneOut in [[stage_in]],
+                               constant MockupUniforms &u [[buffer(1)]],
+                               texture2d<float> env [[texture(0)]],
+                               texture2d<float> screen [[texture(1)]],
+                               sampler envSampler [[sampler(0)]],
+                               sampler screenSampler [[sampler(1)]]) {
+    float3 N = normalize(in.normal);
+    float3 V = normalize(u.cameraPos.xyz - in.world);
+    if (dot(N, V) < 0.0) N = -N;
+    int material = int(in.material + 0.5);
+    float3 specular;
+
+    if (material == 0) {
+        return float4(aces(shade(N, V, u.frameColor.rgb, 1.0, u.frameColor.w, env, envSampler, u, specular)), 1.0);
+    }
+    if (material == 1) {
+        return float4(aces(shade(N, V, u.backColor.rgb, 0.0, u.backColor.w, env, envSampler, u, specular)), 1.0);
+    }
+    if (material == 4) {
+        // Camera plateau: glossy glass with three lenses, flash and sensor.
+        float2 p = in.face - u.plateau.xy;
+        float s = u.plateau.z;
+        float2 lenses[3] = { float2(-0.22, 0.22) * s, float2(-0.22, -0.22) * s, float2(0.22, 0.0) * s };
+        float ring = 0.0, glass = 0.0;
+        for (int i = 0; i < 3; i++) {
+            float d = length(p - lenses[i]);
+            ring = max(ring, coverage(d - 0.19 * s));
+            glass = max(glass, coverage(d - 0.145 * s));
+        }
+        float flash = coverage(length(p - float2(0.23, 0.28) * s) - 0.045 * s);
+        float sensor = coverage(length(p - float2(0.23, -0.28) * s) - 0.04 * s);
+        float3 base = shade(N, V, u.backColor.rgb, 0.0, 0.18, env, envSampler, u, specular);
+        float3 metal = shade(N, V, u.frameColor.rgb, 1.0, 0.18, env, envSampler, u, specular);
+        float3 lens = shade(N, V, float3(0.004, 0.006, 0.012), 0.0, 0.03, env, envSampler, u, specular) + float3(0.002, 0.004, 0.01);
+        float3 flashColor = shade(N, V, float3(0.85, 0.78, 0.6), 0.0, 0.25, env, envSampler, u, specular);
+        float3 c = mix(base, metal, ring);
+        c = mix(c, lens, glass);
+        c = mix(c, flashColor, flash);
+        c = mix(c, float3(0.01), sensor);
+        return float4(aces(c), 1.0);
+    }
+
+    // Front: glass over bezel, screen and Dynamic Island.
+    float2 p = in.face;
+    float screenMask = coverage(sd_rounded_box(p, u.screen.xy, u.screen.z));
+    float2 islandHalf = u.island.yz;
+    float islandMask = u.island.y > 0.0 ? coverage(sd_rounded_box(p - float2(0.0, u.island.x), islandHalf, islandHalf.y)) : 0.0;
+    float2 uv = u.screen.w > 0.5
+        ? float2((u.screen.y - p.y) / (2.0 * u.screen.y), (u.screen.x - p.x) / (2.0 * u.screen.x))
+        : float2((p.x + u.screen.x) / (2.0 * u.screen.x), (u.screen.y - p.y) / (2.0 * u.screen.y));
+    float3 content = screen.sample(screenSampler, uv).rgb;
+    float3 glass = shade(N, V, float3(0.008), 0.0, 0.035, env, envSampler, u, specular);
+    float3 bezel = aces(glass);
+    float3 lit = content + aces(specular) * u.misc.x;
+    float visible = screenMask * (1.0 - islandMask);
+    return float4(mix(bezel, lit, visible), 1.0);
+}
+
+// MARK: - Mockup: shadow
+
+// The phone flattened onto the floor plane along the light direction.
+vertex float4 shadow_vertex(uint vid [[vertex_id]],
+                            const device PhoneVertex *vertices [[buffer(0)]],
+                            constant MockupUniforms &u [[buffer(1)]],
+                            constant float4 &light [[buffer(2)]]) {
+    float4 world = u.model * float4(vertices[vid].position.xyz, 1.0);
+    float floorY = u.misc.y;
+    float t = (world.y - floorY) / max(-light.y, 1e-3);
+    float3 p = world.xyz + light.xyz * t;
+    p.y = floorY;
+    return u.viewProj * float4(p, 1.0);
+}
+
+fragment float4 shadow_mask_fragment() {
+    return float4(1.0);
+}
+
+// Two blurred masks (soft cast shadow + tight contact shadow) darken what's behind.
+fragment float4 shadow_composite_fragment(FullscreenOut in [[stage_in]],
+                                          constant float4 &p [[buffer(0)]],
+                                          texture2d<float> soft [[texture(0)]],
+                                          texture2d<float> contact [[texture(1)]],
+                                          sampler smp [[sampler(0)]]) {
+    float a = saturate(soft.sample(smp, in.uv).r * p.x + contact.sample(smp, in.uv).r * p.y);
+    return float4(0.0, 0.0, 0.0, a);
+}
+
+// Adds a premultiplied layer scaled by a weight (sub-frame averaging).
+fragment float4 accumulate_fragment(FullscreenOut in [[stage_in]],
+                                    constant float4 &w [[buffer(0)]],
+                                    texture2d<float> layer [[texture(0)]],
+                                    sampler smp [[sampler(0)]]) {
+    return layer.sample(smp, in.uv) * w.x;
+}
 """#

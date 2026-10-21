@@ -43,6 +43,17 @@ if let image = value("--image") {
     project.canvas.background = .image(ImageBackground(source: .projectFile(relativePath: path), blur: Double(value("--blur") ?? "0") ?? 0))
 }
 if let g = value("--grain").flatMap(Double.init) { project.canvas.backgroundNoise = g }
+if let finish = value("--mockup") {
+    project.mockup.device = .phone
+    project.mockup.finish = MockupSettings.Finish(rawValue: finish) ?? .black
+}
+if let env = value("--env") { project.mockup.environment = env }
+if let yaw = value("--yaw").flatMap(Double.init) { project.mockup.lightYaw = yaw }
+if let shot = value("--shot").flatMap(CameraPreset.init(rawValue:)) {
+    let f = value("--shot-focus").map(numbers)
+    project.cameraClips = [CameraClip(range: TimeRange(start: 0, end: project.recording.duration), preset: shot,
+                                      focus: f.map { UnitPoint2D(x: $0[0], y: $0[1]) })]
+}
 if let m = value("--motion").flatMap(Double.init) { project.motionBlur.enabled = m > 0; project.motionBlur.amount = m }
 if let p = value("--padding").flatMap(Double.init) { project.canvas.padding = p }
 if let r = value("--radius").flatMap(Double.init) { project.canvas.cornerRadius = r }
@@ -105,7 +116,8 @@ let motion = args.contains("--crop-mode") ? nil : FrameLayout.motionBlur(
     frameDuration: 1 / Double(project.export.fps), quality: .export
 )
 if let motion { print("motion blur: camera \(motion.hasCameraMotion), cursor samples \(motion.cursors.count)") }
-let image = try renderer.render(layout: layout, source: source, motion: motion)
+let mockup = FrameLayout.mockup(project: project, time: time, cursor: track, frameDuration: 1 / Double(project.export.fps), quality: .export)
+let image = try renderer.render(layout: layout, source: source, motion: motion, mockup: mockup)
 let elapsed = Date().timeIntervalSince(start)
 
 let out = URL(fileURLWithPath: value("--out") ?? "frame.png")

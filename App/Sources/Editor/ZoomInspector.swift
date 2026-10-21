@@ -9,6 +9,19 @@ struct ZoomInspector: View {
     private var hasTelemetry: Bool { model.telemetry != nil }
 
     var body: some View {
+        if project?.mockup.isEnabled == true {
+            SCPanel(padding: 12) {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "iphone").foregroundStyle(Palette.trackCamera)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("The 3D phone is on: camera shots frame the action instead of flat zooms. Auto camera turns these zooms into close-ups.")
+                            .font(Typo.label).foregroundStyle(Palette.textSecondary).fixedSize(horizontal: false, vertical: true)
+                        Button("Auto camera", systemImage: "wand.and.stars") { model.autoCamera() }
+                            .buttonStyle(.sc(.secondary, size: .small))
+                    }
+                }
+            }
+        }
         if let first = zooms.first(where: { model.selectedZooms.contains($0.id) }) {
             SelectedZoomPanel(model: model, zoom: first, count: model.selectedZooms.count)
         }

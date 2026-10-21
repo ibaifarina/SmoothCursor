@@ -121,7 +121,7 @@ public final class ExportSession: @unchecked Sendable {
     }
 
     /// Frame layout and motion blur for output time `t`.
-    private func frame(at t: Seconds, kept: [TimeRange], size: CGSize, fps: Int) -> (FrameLayout, MotionBlurFrame?) {
+    private func frame(at t: Seconds, kept: [TimeRange], size: CGSize, fps: Int) -> (FrameLayout, MotionBlurFrame?, MockupFrame?) {
         let project = request.project
         let source = Cuts.sourceTime(forOutput: t, in: kept)
         let layout = FrameLayout.make(project: project, time: source, outputSize: size, cursor: request.cursor, camera: request.camera)
@@ -129,7 +129,8 @@ public final class ExportSession: @unchecked Sendable {
             project: project, time: source, outputSize: size, cursor: request.cursor, camera: request.camera,
             frameDuration: 1 / Double(fps), quality: .export
         )
-        return (layout, motion)
+        let mockup = FrameLayout.mockup(project: project, time: source, cursor: request.cursor, frameDuration: 1 / Double(fps), quality: .export)
+        return (layout, motion, mockup)
     }
 
     private func makeCompositor(_ context: MetalContext) throws -> Compositor {
@@ -225,10 +226,10 @@ public final class ExportSession: @unchecked Sendable {
                             }
                             let source = frames.frame(at: t)
                             let sourceTexture = source.flatMap { context.makeTexture(from: $0) }
-                            let (layout, motion) = self.frame(at: t, kept: media.kept, size: size, fps: fps)
+                            let (layout, motion, mockup) = self.frame(at: t, kept: media.kept, size: size, fps: fps)
                             compositor.encode(
                                 layout: layout, source: sourceTexture?.texture, sourceChanged: frames.changed,
-                                into: target.texture, commandBuffer: commandBuffer, motion: motion
+                                into: target.texture, commandBuffer: commandBuffer, motion: motion, mockup: mockup
                             )
                             commandBuffer.commit()
                             commandBuffer.waitUntilCompleted()
@@ -345,8 +346,8 @@ public final class ExportSession: @unchecked Sendable {
         for index in 0..<total {
             if isCancelled { throw ExportError.cancelled }
             let t = Double(index) * delay
-            let (layout, motion) = frame(at: t, kept: media.kept, size: size, fps: fps)
-            let image = try renderer.render(layout: layout, source: frames.frame(at: t), motion: motion)
+            let (layout, motion, mockup) = frame(at: t, kept: media.kept, size: size, fps: fps)
+            let image = try renderer.render(layout: layout, source: frames.frame(at: t), motion: motion, mockup: mockup)
             CGImageDestinationAddImage(destination, image, frameProperties)
             if index % 3 == 0 || index == total - 1 { progress(ExportProgress(framesRendered: index + 1, totalFrames: total)) }
         }

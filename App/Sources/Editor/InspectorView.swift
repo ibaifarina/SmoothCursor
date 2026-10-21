@@ -6,14 +6,24 @@ struct InspectorView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    content
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        Color.clear.frame(height: 0).id("top")
+                        content
+                    }
+                    .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .padding(16)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .scrollIndicators(.never)
+                // Selecting something shows its settings, which sit at the top of the panel.
+                .onChange(of: model.selectedShots) { _, ids in
+                    if !ids.isEmpty { withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("top", anchor: .top) } }
+                }
+                .onChange(of: model.selectedZooms) { _, ids in
+                    if !ids.isEmpty { withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("top", anchor: .top) } }
+                }
             }
-            .scrollIndicators(.never)
             SCDivider(vertical: true)
             VStack(spacing: 4) {
                 ForEach(InspectorTab.allCases) { tab in
@@ -35,7 +45,7 @@ struct InspectorView: View {
         case .background: BackgroundInspector(model: model)
         case .cursor: CursorInspector(model: model)
         case .zoom: ZoomInspector(model: model)
-        case .mockup: comingSoon("3D phone mockups", step: 9, icon: "iphone")
+        case .mockup: MockupInspector(model: model)
         case .export: ExportInspector(model: model)
         }
     }

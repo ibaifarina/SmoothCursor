@@ -30,7 +30,7 @@ extension FrameLayout {
         cursor: CursorTrack?, camera: CameraTrack?, frameDuration: Seconds, quality: MotionBlurQuality
     ) -> MotionBlurFrame? {
         let settings = project.motionBlur
-        guard settings.enabled, settings.amount > 0.001 else { return nil }
+        guard settings.enabled, settings.amount > 0.001, !project.mockup.isEnabled else { return nil }
         let shutter = settings.amount * frameDuration
         let a = time - shutter / 2, b = time + shutter / 2
 

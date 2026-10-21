@@ -145,9 +145,13 @@ public final class PreviewView: NSView {
             project: project, time: time, outputSize: size, cursor: cursorTrack, camera: cameraTrack,
             frameDuration: 1 / Double(max(project.export.fps, 1)), quality: .preview
         )
+        let mockup = cropEditing ? nil : FrameLayout.mockup(
+            project: project, time: time, cursor: cursorTrack,
+            frameDuration: 1 / Double(max(project.export.fps, 1)), quality: .preview
+        )
         compositor.encode(
             layout: layout, source: currentFrame?.texture, sourceChanged: frameChanged,
-            into: drawable.texture, commandBuffer: commandBuffer, motion: motion
+            into: drawable.texture, commandBuffer: commandBuffer, motion: motion, mockup: mockup
         )
         frameChanged = false
         let frame = currentFrame

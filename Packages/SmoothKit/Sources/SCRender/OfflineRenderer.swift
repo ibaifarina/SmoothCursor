@@ -12,7 +12,7 @@ public final class OfflineRenderer {
         compositor = try Compositor(context: context)
     }
 
-    public func render(layout: FrameLayout, source: CVPixelBuffer?, motion: MotionBlurFrame? = nil) throws -> CGImage {
+    public func render(layout: FrameLayout, source: CVPixelBuffer?, motion: MotionBlurFrame? = nil, mockup: MockupFrame? = nil) throws -> CGImage {
         let width = Int(layout.outputSize.width.rounded()), height = Int(layout.outputSize.height.rounded())
         let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: compositor.pixelFormat, width: width, height: height, mipmapped: false)
         d.usage = [.renderTarget, .shaderRead]
@@ -24,7 +24,7 @@ public final class OfflineRenderer {
         else { throw RenderError.pipeline("offline target") }
 
         let frame = source.flatMap { context.makeTexture(from: $0) }
-        compositor.encode(layout: layout, source: frame?.texture, sourceChanged: true, into: target, commandBuffer: commandBuffer, motion: motion)
+        compositor.encode(layout: layout, source: frame?.texture, sourceChanged: true, into: target, commandBuffer: commandBuffer, motion: motion, mockup: mockup)
         if let blit = commandBuffer.makeBlitCommandEncoder() {
             blit.copy(
                 from: target, sourceSlice: 0, sourceLevel: 0, sourceOrigin: MTLOrigin(),

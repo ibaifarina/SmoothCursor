@@ -80,6 +80,8 @@ public struct FrameLayout: Equatable, Sendable {
         cursor track: CursorTrack? = nil, camera: CameraTrack? = nil
     ) -> FrameLayout {
         var layout = base(project: project, outputSize: outputSize)
+        // With a device mockup the phone carries the recording: no flat zoom, cursor lives on the screen.
+        guard !project.mockup.isEnabled else { return layout }
         if let camera { layout.camera = camera.camera(at: time, outputSize: outputSize) }
         if let track {
             layout.placeCursor(track: track, time: time, toCanvas: layout.mapping(targetSize: track.targetSize), settings: project.cursor)
