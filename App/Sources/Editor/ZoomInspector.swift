@@ -9,6 +9,9 @@ struct ZoomInspector: View {
     private var hasTelemetry: Bool { model.telemetry != nil }
 
     var body: some View {
+        if let first = zooms.first(where: { model.selectedZooms.contains($0.id) }) {
+            SelectedZoomPanel(model: model, zoom: first, count: model.selectedZooms.count)
+        }
         VStack(alignment: .leading, spacing: 14) {
             SCSectionHeader("Auto zoom") {
                 SCBadge(text: "\(zooms.filter { $0.origin == .auto }.count) auto · \(zooms.filter { $0.origin == .manual }.count) manual")
@@ -51,7 +54,8 @@ struct ZoomInspector: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             ForEach(zooms) { zoom in
-                ZoomRow(zoom: zoom, isActive: zoom.range.contains(model.playback?.time ?? -1)) {
+                ZoomRow(zoom: zoom, isActive: model.selectedZooms.contains(zoom.id)) {
+                    model.select(zoom: zoom.id, extend: extendingSelection)
                     model.playback?.seek(to: zoom.range.start)
                 } onDelete: {
                     model.update("Delete Zoom") { $0.zooms.removeAll { $0.id == zoom.id } }
@@ -106,4 +110,100 @@ private struct ZoomRow: View {
 
 extension ZoomSegment.Focus {
     var isFollow: Bool { if case .followCursor = self { true } else { false } }
+}
+
+
+enum EasingPreset: String, CaseIterable {
+    case smooth, snappy, linear, bouncy
+
+    var easing: Easing {
+        switch self {
+        case .smooth: .default
+        case .snappy: .cubicBezier(x1: 0.2, y1: 0, x2: 0, y2: 1)
+        case .linear: .linear
+        case .bouncy: .spring(.bouncy)
+        }
+    }
+
+    init(_ easing: Easing) {
+        self = Self.allCases.first { $0.easing == easing } ?? .smooth
+    }
+}
+
+/// Edits every selected zoom at once (values shown are the first selected zoom's).
+private struct SelectedZoomPanel: View {
+    @Bindable var model: EditorModel
+    let zoom: ZoomSegment
+    let count: Int
+
+    private var deadZone: Double {
+        if case let .followCursor(d) = zoom.focus { d } else { 0.22 }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            SCSectionHeader(count == 1 ? "Selected zoom" : "\(count) zooms selected") {
+                Button("Deselect") { model.clearSelection() }.buttonStyle(.sc(.ghost, size: .small))
+            }
+            SCSlider(title: "Zoom level", value: value(\.scale, "Change Zoom Level"), in: 1.1...5, defaultValue: 2,
+                     format: { String(format: "%.1f×", $0) })
+
+            VStack(alignment: .leading, spacing: 7) {
+                Text("Focus").font(Typo.label).foregroundStyle(Palette.textSecondary)
+                SCSegmented(selection: Binding(
+                    get: { zoom.focus.isFollow },
+                    set: { follow in
+                        if follow {
+                            model.updateSelectedZooms("Follow Cursor") { $0.focus = .followCursor(deadZone: 0.22) }
+                        } else {
+                            model.updateSelectedZooms("Fixed Focus") { $0.focus = .fixed(.center) }
+                            model.isPickingFocus = true
+                        }
+                    }
+                ), options: [SCSegmentOption(true, "Follow cursor", icon: "scope"), SCSegmentOption(false, "Fixed point", icon: "plus.viewfinder")], fill: true)
+            }
+            if zoom.focus.isFollow {
+                SCSlider(title: "Dead zone", value: Binding(
+                    get: { deadZone },
+                    set: { v in model.updateSelectedZooms("Change Dead Zone", coalesce: true) { $0.focus = .followCursor(deadZone: v) } }
+                ), in: 0...0.45, defaultValue: 0.22, format: { $0 < 0.02 ? "Tight" : "\(Int($0 * 100))%" })
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("Follow speed").font(Typo.label).foregroundStyle(Palette.textSecondary)
+                    SCSegmented(selection: Binding(
+                        get: { SpringPreset(zoom.followSpring) },
+                        set: { p in model.updateSelectedZooms("Change Follow Speed") { $0.followSpring = p.params } }
+                    ), options: [SpringPreset.gentle, .smooth, .snappy].map { SCSegmentOption($0, $0.rawValue.capitalized) }, fill: true)
+                }
+            } else {
+                Button(model.isPickingFocus ? "Click the canvas…" : "Pick focus on canvas", systemImage: "scope") {
+                    model.isPickingFocus.toggle()
+                }
+                .buttonStyle(.sc(model.isPickingFocus ? .primary : .secondary, size: .small))
+            }
+
+            VStack(alignment: .leading, spacing: 7) {
+                Text("Easing").font(Typo.label).foregroundStyle(Palette.textSecondary)
+                SCSegmented(selection: Binding(
+                    get: { EasingPreset(zoom.easing) },
+                    set: { p in model.updateSelectedZooms("Change Easing") { $0.easing = p.easing } }
+                ), options: EasingPreset.allCases.map { SCSegmentOption($0, $0.rawValue.capitalized) }, fill: true)
+            }
+            SCSlider(title: "Zoom in", value: value(\.transitionIn, "Change Zoom In"), in: 0...2, defaultValue: 0.7,
+                     format: { String(format: "%.2f s", $0) })
+            SCSlider(title: "Zoom out", value: value(\.transitionOut, "Change Zoom Out"), in: 0...2, defaultValue: 0.8,
+                     format: { String(format: "%.2f s", $0) })
+            Button(count == 1 ? "Delete Zoom" : "Delete \(count) Zooms", systemImage: "trash") { model.deleteSelection() }
+                .buttonStyle(.sc(.destructive, size: .small))
+        }
+        .padding(12)
+        .background(Palette.accentSoft.opacity(0.5), in: .rect(cornerRadius: Radius.l))
+        .overlay(RoundedRectangle(cornerRadius: Radius.l).strokeBorder(Palette.accent.opacity(0.35)))
+    }
+
+    private func value(_ keyPath: WritableKeyPath<ZoomSegment, Double>, _ name: String) -> Binding<Double> {
+        Binding(
+            get: { zoom[keyPath: keyPath] },
+            set: { v in model.updateSelectedZooms(name, coalesce: true) { $0[keyPath: keyPath] = v } }
+        )
+    }
 }

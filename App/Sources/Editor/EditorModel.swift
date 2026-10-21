@@ -42,6 +42,15 @@ final class EditorModel {
     private(set) var telemetry: Telemetry?
     @ObservationIgnored var cursorPacks: CursorPackStore?
 
+    // Timeline
+    var selectedZooms: Set<UUID> = []
+    var selectedClip: Int?
+    /// Timeline magnification: 1 = whole recording fits the width.
+    var timelineZoom = 1.0
+    private(set) var waveform: [Float] = []
+    /// While true, a click on the canvas sets the fixed focus of the selected zooms.
+    var isPickingFocus = false
+
     @ObservationIgnored weak var undoManager: UndoManager?
     /// Consecutive edits with the same name inside this window become one undo step (slider drags).
     @ObservationIgnored private var lastEdit: (name: String, at: Date)?
@@ -76,14 +85,21 @@ final class EditorModel {
             }
             rebuildCursorTrack()
             rebuildCameraTrack()
+            let videoURL = ProjectPackage.mediaURL(loaded.recording.videoFile, in: url)
+            Task { [weak self] in
+                let peaks = (try? await Task.detached(priority: .utility) { try await Waveform.peaks(of: videoURL) }.value) ?? []
+                self?.waveform = peaks
+            }
             playback = PlaybackController(
                 url: ProjectPackage.mediaURL(loaded.recording.videoFile, in: url),
                 duration: loaded.recording.duration, fps: loaded.recording.fps
             )
+            syncPlaybackCuts()
             #if DEBUG
             if ProcessInfo.processInfo.environment["SC_AUTOPLAY"] != nil { playback?.play() }
             if ProcessInfo.processInfo.environment["SC_CROP"] != nil { isCropping = true }
             if let tab = ProcessInfo.processInfo.environment["SC_TAB"].flatMap(InspectorTab.init(rawValue:)) { inspectorTab = tab }
+            if ProcessInfo.processInfo.environment["SC_SELECT_ZOOM"] != nil, let id = project?.zooms.first?.id { select(zoom: id) }
             #endif
             _ = await Thumbnailer.ensureThumbnail(for: url)
         } catch {
@@ -147,6 +163,78 @@ final class EditorModel {
         cameraTrack = project.zooms.isEmpty ? nil : CameraTrack(project: project, cursor: cursorTrack)
     }
 
+    private func syncPlaybackCuts() {
+        guard let project else { return }
+        playback?.keptRanges = project.cuts.isEmpty ? [] : Cuts.kept(project)
+    }
+
+    // MARK: Timeline actions
+
+    var playheadTime: Seconds { playback?.time ?? 0 }
+
+    func addZoomAtPlayhead() {
+        guard let project, let zoom = ZoomEdits.insertion(at: playheadTime, in: project.zooms, duration: project.recording.duration) else { return }
+        update("Add Zoom") { $0.zooms.append(zoom) }
+        select(zoom: zoom.id)
+    }
+
+    func addZoom(at time: Seconds) {
+        guard let project, let zoom = ZoomEdits.insertion(at: time, in: project.zooms, duration: project.recording.duration) else { return }
+        update("Add Zoom") { $0.zooms.append(zoom) }
+        select(zoom: zoom.id)
+    }
+
+    func select(zoom id: UUID, extend: Bool = false) {
+        selectedClip = nil
+        if extend {
+            if selectedZooms.contains(id) { selectedZooms.remove(id) } else { selectedZooms.insert(id) }
+        } else {
+            selectedZooms = [id]
+        }
+        inspectorTab = .zoom
+    }
+
+    func selectAllZooms() {
+        selectedClip = nil
+        selectedZooms = Set(project?.zooms.map(\.id) ?? [])
+        if !selectedZooms.isEmpty { inspectorTab = .zoom }
+    }
+
+    func clearSelection() {
+        selectedZooms = []
+        selectedClip = nil
+        isPickingFocus = false
+    }
+
+    func updateSelectedZooms(_ actionName: String, coalesce: Bool = false, _ change: @escaping (inout ZoomSegment) -> Void) {
+        let ids = selectedZooms
+        guard !ids.isEmpty else { return }
+        update(actionName, coalesce: coalesce) { $0.zooms = ZoomEdits.update($0.zooms, ids: ids, change) }
+    }
+
+    func deleteSelection() {
+        if !selectedZooms.isEmpty {
+            let ids = selectedZooms
+            update(ids.count == 1 ? "Delete Zoom" : "Delete Zooms") { $0.zooms.removeAll { ids.contains($0.id) } }
+            selectedZooms = []
+        } else if let clip = selectedClip, let project, let cuts = Cuts.remove(project, index: clip) {
+            update("Delete Clip") { $0.cuts = cuts }
+            selectedClip = nil
+        }
+    }
+
+    /// Splits the video clip under the playhead.
+    func splitAtPlayhead() {
+        guard let project, let cuts = Cuts.split(project, at: playheadTime) else { return }
+        update("Split Clip") { $0.cuts = cuts }
+    }
+
+    /// Sets the fixed focus of the selected zooms (source unit coordinates).
+    func setFocus(_ point: UnitPoint2D) {
+        updateSelectedZooms("Set Zoom Focus") { $0.focus = .fixed(point) }
+        isPickingFocus = false
+    }
+
     /// Re-places automatic zooms (manual ones are kept) as one undoable edit.
     func regenerateAutoZooms(_ actionName: String = "Regenerate Zooms", coalesce: Bool = false, _ change: (inout Project) -> Void = { _ in }) {
         guard let telemetry else { return }
@@ -164,6 +252,10 @@ final class EditorModel {
         if cursorChanged || old?.zooms != next.zooms || old?.canvas != next.canvas || old?.recording != next.recording {
             rebuildCameraTrack()
         }
+        if old?.cuts != next.cuts { syncPlaybackCuts() }
+        // Drop selections that no longer exist (undo, delete).
+        selectedZooms.formIntersection(next.zooms.map(\.id))
+        if let clip = selectedClip, clip >= Cuts.kept(next).count { selectedClip = nil }
         autosaver.schedule(next)
         guard let previous, let undoManager else { return }
         undoManager.registerUndo(withTarget: self) { model in

@@ -66,12 +66,12 @@ private struct EditorLayout: View {
             SCDivider()
             Group {
                 if let playback = model.playback {
-                    TimelinePlaceholder(project: project, playback: playback)
+                    TimelineView(model: model, project: project, playback: playback)
                 } else {
                     Color.clear
                 }
             }
-            .frame(height: 176)
+            .frame(height: 216)
             .background(Palette.surface)
         }
         .background { EditorShortcuts(model: model) }
@@ -174,14 +174,16 @@ private struct TransportBar: View {
     var body: some View {
         ZStack {
             HStack(spacing: 8) {
-                Button("Zoom", systemImage: "plus") {
-                    let start = model.playback?.time ?? 0
-                    model.update("Add Zoom") {
-                        $0.zooms.append(ZoomSegment(range: TimeRange(start: start, end: min(start + 2.5, duration))))
-                    }
-                }
-                .buttonStyle(.sc(.ghost, size: .small))
-                .help("Add a zoom at the playhead")
+                Button("Zoom", systemImage: "plus") { model.addZoomAtPlayhead() }
+                    .buttonStyle(.sc(.ghost, size: .small))
+                    .help("Add a zoom at the playhead (Z)")
+                Button("Split", systemImage: "scissors") { model.splitAtPlayhead() }
+                    .buttonStyle(.sc(.ghost, size: .small))
+                    .help("Split the video at the playhead (S)")
+                Button("Delete", systemImage: "trash") { model.deleteSelection() }
+                    .buttonStyle(.scIcon())
+                    .help("Delete selection (⌫)")
+                    .disabled(model.selectedZooms.isEmpty && model.selectedClip == nil)
                 Spacer()
                 Button("Crop", systemImage: "crop") {
                     withAnimation(.spring(duration: 0.3)) { model.isCropping.toggle() }
@@ -194,8 +196,8 @@ private struct TransportBar: View {
                     minWidth: 150
                 )
             }
-            if let playback = model.playback {
-                PlaybackControls(playback: playback)
+            if let playback = model.playback, let project = model.project {
+                PlaybackControls(playback: playback, editedDuration: project.cuts.isEmpty ? nil : Cuts.editedDuration(project))
             }
         }
         .padding(.horizontal, 12)
@@ -205,6 +207,8 @@ private struct TransportBar: View {
 
 private struct PlaybackControls: View {
     let playback: PlaybackController
+    /// Length after cuts, when there are any.
+    let editedDuration: Seconds?
 
     var body: some View {
         HStack(spacing: 14) {
@@ -228,7 +232,10 @@ private struct PlaybackControls: View {
                     .buttonStyle(.scIcon(size: 26))
                     .help("Go to end")
             }
-            Text(playback.duration.timecode).font(Typo.mono).foregroundStyle(Palette.textTertiary).frame(width: 74, alignment: .leading)
+            Text((editedDuration ?? playback.duration).timecode)
+                .font(Typo.mono).foregroundStyle(editedDuration == nil ? Palette.textTertiary : Palette.accent)
+                .frame(width: 74, alignment: .leading)
+                .help(editedDuration == nil ? "Duration" : "Duration after cuts")
         }
     }
 }
@@ -247,6 +254,13 @@ private struct EditorShortcuts: View {
                 Button("Forward 1s") { playback.seek(to: playback.time + 1) }.keyboardShortcut(.rightArrow, modifiers: .shift)
                 Button("Start") { playback.seek(to: 0) }.keyboardShortcut(.home, modifiers: [])
                 Button("End") { playback.seek(to: playback.duration) }.keyboardShortcut(.end, modifiers: [])
+                Button("Delete") { model.deleteSelection() }.keyboardShortcut(.delete, modifiers: [])
+                Button("Split") { model.splitAtPlayhead() }.keyboardShortcut("s", modifiers: [])
+                Button("Add Zoom") { model.addZoomAtPlayhead() }.keyboardShortcut("z", modifiers: [])
+                Button("Select All Zooms") { model.selectAllZooms() }.keyboardShortcut("a", modifiers: .command)
+                Button("Deselect") { model.clearSelection() }.keyboardShortcut(.escape, modifiers: [])
+                Button("Zoom In Timeline") { model.timelineZoom = min(model.timelineZoom * 1.6, 64) }.keyboardShortcut("=", modifiers: .command)
+                Button("Zoom Out Timeline") { model.timelineZoom = max(model.timelineZoom / 1.6, 1) }.keyboardShortcut("-", modifiers: .command)
             }
             .opacity(0)
             .frame(width: 0, height: 0)

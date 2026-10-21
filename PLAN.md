@@ -85,6 +85,8 @@ Tip: steps 6 and 2 can run in parallel with others once step 3 exists.
 
 - [x] **Step 5a — Auto-zoom engine.** `AutoZoom`: interests from clicks, typing bursts (focused on the clicked field), shortcuts and cursor rests (high sensitivity); merged by time, filtered by sensitivity, zoom level lowered so spread-out action fits; regenerate keeps manual zooms; runs on first open of a recording. `CameraTrack` (precomputed, resolution independent): dead-zone follow with the segment's spring, aimed where the cursor settles; segments < 0.9 s apart chain into pans (with a slight pull-back on long pans) instead of zooming out. Zoom inspector: auto toggle, zoom level, sensitivity (live), regenerate, zoom list.
 
+- [x] **Step 5b — Timeline & inspector UX.** Scrollable, zoomable timeline (pinch, ⌘± , fit; zooms around the playhead; follows the playhead while playing) with ruler scrubbing, Video (clips, trim handles, split, delete, removed regions hatched), Zoom (select, ⇧/⌘ multi-select, ⌘A, move, resize, snapping to playhead/edges with ⌥ to bypass, double-click to add, context menu, in/out ramps), Audio (waveform) and Camera lanes. Playback skips cuts; duration after cuts shown. Selected-zoom panel edits all selected zooms: level, follow / fixed (pick on canvas), dead zone, follow speed, easing, in/out durations. Edited auto zooms become manual so regenerating keeps them. Shortcuts: ⌫ delete, S split, Z add zoom, Esc deselect.
+
 ## Build
 
 ```bash

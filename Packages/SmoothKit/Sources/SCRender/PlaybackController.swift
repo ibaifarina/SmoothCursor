@@ -21,6 +21,12 @@ public final class PlaybackController {
 
     @ObservationIgnored private var statusObservation: NSKeyValueObservation?
     @ObservationIgnored private var timeObserver: Any?
+    @ObservationIgnored private var boundaryObserver: Any?
+
+    /// Parts of the recording that are kept; playback jumps over everything else. Empty = all.
+    @ObservationIgnored public var keptRanges: [TimeRange] = [] {
+        didSet { if keptRanges != oldValue { installBoundaries() } }
+    }
     @ObservationIgnored private var endObserver: NSObjectProtocol?
     @ObservationIgnored private var pendingSeek: CMTime?
     @ObservationIgnored private var seekInFlight = false
@@ -66,6 +72,8 @@ public final class PlaybackController {
 
     public func invalidate() {
         player.pause()
+        if let boundaryObserver { player.removeTimeObserver(boundaryObserver) }
+        boundaryObserver = nil
         statusObservation = nil
         if let timeObserver { player.removeTimeObserver(timeObserver) }
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
@@ -78,7 +86,8 @@ public final class PlaybackController {
     public func togglePlay() { isPlaying ? pause() : play() }
 
     public func play() {
-        if time >= duration - frameDuration { seek(to: 0) }
+        if time >= (keptRanges.last?.end ?? duration) - frameDuration { seek(to: keptRanges.first?.start ?? 0) }
+        if !keptRanges.isEmpty, let next = Cuts.nextKeptTime(after: time, in: keptRanges), next != time { seek(to: next) }
         isPlaying = true
         player.play()
         onActivity?()
@@ -114,6 +123,27 @@ public final class PlaybackController {
     public func endScrub() {
         if resumeAfterScrub { play() }
         resumeAfterScrub = false
+    }
+
+    /// At the end of each kept range, jump to the next one (or stop after the last).
+    private func installBoundaries() {
+        if let boundaryObserver { player.removeTimeObserver(boundaryObserver) }
+        boundaryObserver = nil
+        guard !keptRanges.isEmpty else { return }
+        let ends = keptRanges.map { NSValue(time: CMTime(seconds: $0.end, preferredTimescale: 60_000)) }
+        boundaryObserver = player.addBoundaryTimeObserver(forTimes: ends, queue: .main) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.isPlaying else { return }
+                let now = self.player.currentTime().seconds
+                let ranges = self.keptRanges
+                guard let ended = ranges.indices.min(by: { abs(ranges[$0].end - now) < abs(ranges[$1].end - now) }) else { return }
+                if ended + 1 < ranges.count {
+                    self.seek(to: ranges[ended + 1].start)
+                } else {
+                    self.pause()
+                }
+            }
+        }
     }
 
     private func startNextSeek() {

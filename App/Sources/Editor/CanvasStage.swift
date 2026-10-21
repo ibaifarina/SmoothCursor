@@ -17,9 +17,12 @@ struct CanvasStage: View {
             let size = FrameLayout.fit(aspect: aspect, in: CGRect(origin: .zero, size: geo.size)).size
             ZStack {
                 MetalPreview(
-                    project: project, playback: model.playback, cursorTrack: model.cursorTrack, cameraTrack: model.cameraTrack,
+                    project: project, playback: model.playback, cursorTrack: model.cursorTrack, cameraTrack: model.isPickingFocus ? nil : model.cameraTrack,
                     cropEditing: model.isCropping, packageURL: model.packageURL
                 )
+                if model.isPickingFocus && !model.isCropping {
+                    FocusPicker(project: project) { model.setFocus($0) }
+                }
                 if model.isCropping {
                     CropOverlay(
                         crop: model.binding(\.canvas.crop, "Crop"),
@@ -70,6 +73,49 @@ struct MetalPreview: NSViewRepresentable {
         view.cameraTrack = cameraTrack
         view.cropEditing = cropEditing
         view.project = project
+    }
+}
+
+// MARK: - Focus picking
+
+/// Click anywhere on the (unzoomed) recording to set the selected zooms' fixed focus.
+private struct FocusPicker: View {
+    let project: Project
+    let pick: (UnitPoint2D) -> Void
+    @State private var hover: CGPoint?
+
+    var body: some View {
+        GeometryReader { geo in
+            let layout = FrameLayout.base(project: project, outputSize: geo.size)
+            ZStack(alignment: .topLeading) {
+                Color.black.opacity(0.25)
+                if let hover {
+                    let zoomed = CGSize(width: geo.size.width / 2, height: geo.size.height / 2)
+                    RoundedRectangle(cornerRadius: Radius.s)
+                        .strokeBorder(Palette.accent, style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
+                        .frame(width: zoomed.width, height: zoomed.height)
+                        .position(hover)
+                    Image(systemName: "plus").font(.system(size: 18, weight: .bold)).foregroundStyle(Palette.accent).position(hover)
+                }
+                Text("Click where the zoom should focus · Esc to cancel")
+                    .font(Typo.label)
+                    .padding(.horizontal, 10).frame(height: 26)
+                    .background(Palette.surface, in: .capsule)
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 12)
+            }
+            .contentShape(.rect)
+            .onContinuousHover { phase in
+                if case let .active(p) = phase { hover = p } else { hover = nil }
+            }
+            .onTapGesture { p in
+                let s = layout.screenRect, crop = layout.sourceCrop
+                guard s.width > 0, s.height > 0 else { return }
+                let u = CGPoint(x: min(max((p.x - s.minX) / s.width, 0), 1), y: min(max((p.y - s.minY) / s.height, 0), 1))
+                pick(UnitPoint2D(x: crop.x + u.x * crop.width, y: crop.y + u.y * crop.height))
+            }
+            .pointerStyle(.rectSelection)
+        }
     }
 }
 
