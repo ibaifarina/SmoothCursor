@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import Observation
 import SCCapture
+import SCExport
 import SCProject
 
 /// App-wide state shared by all windows.
@@ -10,6 +11,7 @@ final class AppModel {
     let library = ProjectLibrary()
     let permissions = PermissionCenter()
     let cursorPacks = CursorPackStore()
+    let exports = ExportQueue()
     let recorder: RecordingController
     var lastError: String?
 

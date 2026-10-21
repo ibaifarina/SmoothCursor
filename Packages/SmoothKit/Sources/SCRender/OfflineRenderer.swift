@@ -23,7 +23,7 @@ public final class OfflineRenderer {
               let commandBuffer = context.queue.makeCommandBuffer()
         else { throw RenderError.pipeline("offline target") }
 
-        let frame = source.flatMap(context.makeTexture(from:))
+        let frame = source.flatMap { context.makeTexture(from: $0) }
         compositor.encode(layout: layout, source: frame?.texture, sourceChanged: true, into: target, commandBuffer: commandBuffer, motion: motion)
         if let blit = commandBuffer.makeBlitCommandEncoder() {
             blit.copy(

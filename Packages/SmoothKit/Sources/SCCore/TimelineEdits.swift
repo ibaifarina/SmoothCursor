@@ -146,6 +146,26 @@ public enum Cuts {
         return ranges
     }
 
+    /// Source time shown at `output` seconds into the edited video.
+    public static func sourceTime(forOutput output: Seconds, in ranges: [TimeRange]) -> Seconds {
+        var remaining = output
+        for r in ranges {
+            if remaining < r.duration { return r.start + max(remaining, 0) }
+            remaining -= r.duration
+        }
+        return ranges.last?.end ?? output
+    }
+
+    /// Position in the edited video of a source time, or nil if that moment was cut.
+    public static func outputTime(forSource source: Seconds, in ranges: [TimeRange]) -> Seconds? {
+        var offset = 0.0
+        for r in ranges {
+            if r.contains(source) { return offset + source - r.start }
+            offset += r.duration
+        }
+        return nil
+    }
+
     /// Where playback continues after `time` if it falls in a removed region (nil = past the end).
     public static func nextKeptTime(after time: Seconds, in ranges: [TimeRange]) -> Seconds? {
         if ranges.contains(where: { $0.contains(time) }) { return time }

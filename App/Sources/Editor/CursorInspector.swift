@@ -87,6 +87,9 @@ struct CursorInspector: View {
                 options: CursorSettings.ClickEffect.allCases.map { SCSegmentOption($0, $0.rawValue.capitalized) },
                 fill: true
             )
+            Toggle("Click sound", isOn: model.binding(\.cursor.clickSound, "Toggle Click Sound", coalesce: false))
+                .toggleStyle(.scSwitch)
+                .help("Adds a soft click to the exported audio on every click")
             if cursor.clickEffect == .ripple || cursor.clickEffect == .pulse {
                 HStack(spacing: 8) {
                     Text("Color").font(Typo.label).foregroundStyle(Palette.textSecondary)

@@ -41,8 +41,11 @@ public enum ProjectPackage {
     }
 
     /// Objects merge key by key; anything else (values, arrays) is taken from `override`.
+    /// Single-key objects with different keys are enum cases (`{"image": …}` vs `{"gradient": …}`):
+    /// the stored case wins outright instead of being mixed with the default one.
     static func deepMerge(_ base: Any, _ override: Any) -> Any {
         guard var base = base as? [String: Any], let override = override as? [String: Any] else { return override }
+        if base.count == 1, override.count == 1, base.keys.first != override.keys.first { return override }
         for (key, value) in override {
             base[key] = base[key].map { deepMerge($0, value) } ?? value
         }

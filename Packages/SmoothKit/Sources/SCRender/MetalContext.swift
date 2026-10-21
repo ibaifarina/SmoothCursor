@@ -43,11 +43,14 @@ public final class MetalContext: @unchecked Sendable {
     }
 
     /// Wraps a BGRA pixel buffer as an sRGB texture (sampling returns linear light).
-    public func makeTexture(from pixelBuffer: CVPixelBuffer) -> FrameTexture? {
+    /// `renderTarget`: also usable as a render target (export writes straight into encoder buffers).
+    public func makeTexture(from pixelBuffer: CVPixelBuffer, renderTarget: Bool = false) -> FrameTexture? {
         let width = CVPixelBufferGetWidth(pixelBuffer), height = CVPixelBufferGetHeight(pixelBuffer)
         var cvTexture: CVMetalTexture?
+        let usage: MTLTextureUsage = renderTarget ? [.shaderRead, .renderTarget] : [.shaderRead]
+        let attributes = [kCVMetalTextureUsage as String: usage.rawValue] as CFDictionary
         let status = CVMetalTextureCacheCreateTextureFromImage(
-            nil, textureCache, pixelBuffer, nil, .bgra8Unorm_srgb, width, height, 0, &cvTexture
+            nil, textureCache, pixelBuffer, attributes, .bgra8Unorm_srgb, width, height, 0, &cvTexture
         )
         guard status == kCVReturnSuccess, let cvTexture, let texture = CVMetalTextureGetTexture(cvTexture) else { return nil }
         return FrameTexture(texture: texture, cvTexture: cvTexture, pixelBuffer: pixelBuffer)

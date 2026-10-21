@@ -117,8 +117,7 @@ private struct EditorTitleBar: View {
         } trailing: {
             Button("Record", systemImage: "record.circle") { openWindow(id: WindowID.recorder) }
                 .buttonStyle(.sc(.secondary, size: .small))
-            Button("Export", systemImage: "square.and.arrow.up") { model.inspectorTab = .export }
-                .buttonStyle(.sc(.primary, size: .small))
+            ExportButton(model: model, projectID: project.id)
         }
     }
 
@@ -286,5 +285,31 @@ extension AspectRatio {
         case .square: "square"
         case .custom: "rectangle.dashed"
         }
+    }
+}
+
+/// Title bar Export button; shows a progress ring while this project is exporting.
+private struct ExportButton: View {
+    @Environment(AppModel.self) private var app
+    let model: EditorModel
+    let projectID: UUID
+
+    var body: some View {
+        Button { model.inspectorTab = .export } label: {
+            HStack(spacing: 6) {
+                if case let .running(p) = app.exports.activeJob(for: projectID)?.state {
+                    ZStack {
+                        Circle().stroke(.white.opacity(0.3), lineWidth: 2)
+                        Circle().trim(from: 0, to: p).stroke(.white, style: StrokeStyle(lineWidth: 2, lineCap: .round)).rotationEffect(.degrees(-90))
+                    }
+                    .frame(width: 12, height: 12)
+                    Text("\(Int(p * 100))%").monospacedDigit()
+                } else {
+                    Image(systemName: "square.and.arrow.up").font(.system(size: 12, weight: .semibold))
+                    Text("Export")
+                }
+            }
+        }
+        .buttonStyle(.sc(.primary, size: .small))
     }
 }

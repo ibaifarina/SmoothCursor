@@ -43,9 +43,35 @@ public struct ExportSettings: Codable, Hashable, Sendable {
 
     public var format: Format = .mp4
     public var codec: VideoCodec = .h264
-    /// Output height in pixels; width is derived from the canvas aspect.
+    /// Short side of the output in pixels (1080 → 1920×1080 landscape, 1080×1920 vertical).
     public var height = 1080
     public var fps = 60
     public var quality = 0.8
+    public var includeAudio = true
     public init() {}
+
+    /// Output pixel size for a canvas aspect (width ÷ height); even numbers for the encoders.
+    public func outputSize(aspect: Double) -> PixelSize {
+        let short = Double(format == .gif ? min(height, 720) : height)
+        let w = aspect >= 1 ? short * aspect : short
+        let h = aspect >= 1 ? short : short / max(aspect, 0.01)
+        return PixelSize(width: Int(w.rounded()) & ~1, height: Int(h.rounded()) & ~1)
+    }
+
+    /// GIFs are capped at 30 fps (players ignore faster frame delays anyway).
+    public var effectiveFPS: Int { format == .gif ? min(fps, 30) : fps }
+
+    /// Rough encoded size, for the export panel.
+    public func estimatedBytes(aspect: Double, duration: Seconds) -> Double {
+        let size = outputSize(aspect: aspect)
+        let pixels = Double(size.width * size.height)
+        let bitsPerSecond: Double = switch (format, codec) {
+        case (.gif, _): pixels * Double(effectiveFPS) * 0.9
+        case (_, .proRes422): pixels * Double(fps) * 4.5
+        case (_, .proRes4444): pixels * Double(fps) * 7
+        case (_, .hevc): pixels * Double(fps) * (0.025 + 0.1 * quality)
+        default: pixels * Double(fps) * (0.035 + 0.14 * quality)
+        }
+        return (bitsPerSecond + (includeAudio ? 192_000 : 0)) * duration / 8
+    }
 }

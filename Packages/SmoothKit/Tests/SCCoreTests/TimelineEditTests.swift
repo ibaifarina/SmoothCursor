@@ -59,3 +59,24 @@ import Testing
         #expect(p.cuts.isEmpty) // back to "everything"
     }
 }
+
+@Suite struct ExportMathTests {
+    @Test func timeMappingThroughCuts() {
+        let kept = [TimeRange(start: 0, end: 4), TimeRange(start: 6, end: 10)]
+        #expect(Cuts.sourceTime(forOutput: 3, in: kept) == 3)
+        #expect(Cuts.sourceTime(forOutput: 5, in: kept) == 7)
+        #expect(Cuts.outputTime(forSource: 7, in: kept) == 5)
+        #expect(Cuts.outputTime(forSource: 5, in: kept) == nil)
+    }
+
+    @Test func outputSizesUseShortSide() {
+        var e = ExportSettings()
+        e.height = 1080
+        #expect(e.outputSize(aspect: 16.0 / 9) == PixelSize(width: 1920, height: 1080))
+        #expect(e.outputSize(aspect: 9.0 / 16) == PixelSize(width: 1080, height: 1920))
+        e.format = .gif
+        e.height = 2160
+        #expect(e.outputSize(aspect: 1).width == 720)
+        #expect(e.effectiveFPS == 30)
+    }
+}

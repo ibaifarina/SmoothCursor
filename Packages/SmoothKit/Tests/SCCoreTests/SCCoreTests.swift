@@ -81,3 +81,22 @@ import Testing
         #expect(loaded.id == p.id)
     }
 }
+
+@Suite struct EnumMigrationTests {
+    @Test func storedEnumCasesSurviveMerging() throws {
+        var p = Project(
+            name: "Old",
+            recording: RecordingInfo(sourceKind: .display, videoFile: "media/screen.mov", pixelSize: PixelSize(width: 100, height: 100), displayScale: 2, fps: 60, duration: 3)
+        )
+        p.canvas.background = .image(ImageBackground(source: .projectFile(relativePath: "media/bg.jpg"), blur: 0.3))
+        p.cursor.sprite = .customPack(id: "builtin-dot")
+        var json = try JSONSerialization.jsonObject(with: ProjectPackage.encoder.encode(p)) as! [String: Any]
+        var export = json["export"] as! [String: Any]
+        export["includeAudio"] = nil // field added later
+        json["export"] = export
+        let loaded = try ProjectPackage.decodeProject(JSONSerialization.data(withJSONObject: json))
+        #expect(loaded.canvas.background == p.canvas.background)
+        #expect(loaded.cursor.sprite == p.cursor.sprite)
+        #expect(loaded.export.includeAudio)
+    }
+}

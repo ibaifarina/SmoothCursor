@@ -91,6 +91,8 @@ Tip: steps 6 and 2 can run in parallel with others once step 3 exists.
 
 - [x] **Step 7 — Motion blur.** Camera: post pass averaging each pixel along its exact screen path over the shutter (zoom+pan is analytic), adaptive taps, jittered. Cursor: sampled at sub-frame instants (each with its own camera), accumulated in a float layer; sample count adapts to travel; teleports stay sharp. Shutter angle setting (default 180°), camera/cursor toggles, preview and export quality tiers; static frames skip the extra passes.
 
+- [x] **Step 8 — Export.** `ExportSession`: cuts via `AVMutableComposition`; frames decoded (VideoToolbox), drawn by the shared compositor straight into encoder IOSurfaces with export-quality motion blur, hardware encoded (H.264 / HEVC / ProRes); audio tracks mixed to stereo AAC with synthesized click sounds; GIF on an exact 1/100 s grid. 20 s 1080p60 H.264 in ~5.5 s (debug build). `ExportQueue`: background, sequential, progress + ETA, cancel. Export panel: presets (YouTube 4K/1080, X/LinkedIn, Reels/TikTok, Instagram 4:5, Square, GIF, ProRes master), format, resolution (short side), fps, quality, audio, size estimate; jobs with copy/reveal; title-bar progress ring; ⌘E. Click sound toggle. Tool: `swift run sc-export`. Fixed: forward-compatible decoding mixed enum cases.
+
 ## Build
 
 ```bash

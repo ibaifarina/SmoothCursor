@@ -36,7 +36,7 @@ struct InspectorView: View {
         case .cursor: CursorInspector(model: model)
         case .zoom: ZoomInspector(model: model)
         case .mockup: comingSoon("3D phone mockups", step: 9, icon: "iphone")
-        case .export: comingSoon("Export", step: 8, icon: "square.and.arrow.up")
+        case .export: ExportInspector(model: model)
         }
     }
 
