@@ -123,6 +123,13 @@ final class InputTelemetryRecorder: @unchecked Sendable {
         }
     }
 
+    private func recordKey(_ kind: Telemetry.Kind, character: UInt32, code: UInt16, modifiers: UInt32) {
+        guard let time = clock.mediaTime(forHost: clock.now) else { return }
+        state.withLock { s in
+            s.events.append(.init(time: time.seconds, kind: kind, x: 0, y: Float(character), code: code, modifiers: modifiers))
+        }
+    }
+
     static func windowFrame(_ id: CGWindowID) -> CGRect? {
         guard let info = (CGWindowListCopyWindowInfo([.optionIncludingWindow], id) as? [[String: Any]])?.first,
               let bounds = info[kCGWindowBounds as String] as? NSDictionary
@@ -179,8 +186,13 @@ final class InputTelemetryRecorder: @unchecked Sendable {
             record(.scroll, globalLocation: event.location, code: UInt16(bitPattern: Int16(clamping: delta)))
         case .keyDown, .keyUp:
             guard event.getIntegerValueField(.keyboardEventAutorepeat) == 0 || type == .keyDown else { return }
-            record(
-                type == .keyDown ? .keyDown : .keyUp, globalLocation: event.location,
+            // Key events carry no position; y stores the produced character (any keyboard layout) instead.
+            var length = 0
+            var chars = [UniChar](repeating: 0, count: 4)
+            event.keyboardGetUnicodeString(maxStringLength: 4, actualStringLength: &length, unicodeString: &chars)
+            let scalar = length > 0 ? String(utf16CodeUnits: chars, count: length).unicodeScalars.first?.value ?? 0 : 0
+            recordKey(
+                type == .keyDown ? .keyDown : .keyUp, character: scalar,
                 code: UInt16(truncatingIfNeeded: event.getIntegerValueField(.keyboardEventKeycode)),
                 modifiers: UInt32(truncatingIfNeeded: event.flags.rawValue)
             )

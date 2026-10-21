@@ -18,6 +18,7 @@ public final class Compositor {
     private let screenPipeline: MTLRenderPipelineState
     private let cursorPipeline: MTLRenderPipelineState
     private let effectPipeline: MTLRenderPipelineState
+    private let webcamPipeline: MTLRenderPipelineState
     private let blurPipeline: MTLRenderPipelineState
     private let copyPipeline: MTLRenderPipelineState
     private let layerPipeline: MTLRenderPipelineState
@@ -26,6 +27,9 @@ public final class Compositor {
     private lazy var mockupRenderer: MockupRenderer? = try? MockupRenderer(context: context, targetFormat: pixelFormat)
     private var cursorLayer: MTLTexture?
     private var cursorTextures: [URL: MTLTexture] = [:]
+    private var overlayTextures: [OverlayText: MTLTexture] = [:]
+    /// Webcam frame for the current `encode` call.
+    private var webcamTexture: MTLTexture?
     private let sampler: MTLSamplerState
     private let placeholder: MTLTexture
     private var mipTexture: MTLTexture?
@@ -68,6 +72,7 @@ public final class Compositor {
         screenPipeline = try pipeline("screen_fragment", blended: true)
         cursorPipeline = try pipeline("cursor_fragment", blended: true, vertex: "corners_vertex")
         effectPipeline = try pipeline("effect_fragment", blended: true)
+        webcamPipeline = try pipeline("webcam_fragment", blended: true)
         blurPipeline = try pipeline("motion_blur_fragment", blended: false, vertex: "fullscreen_vertex")
         copyPipeline = try pipeline("layer_fragment", blended: false, vertex: "fullscreen_vertex")
         layerPipeline = try pipeline("layer_fragment", blended: true, vertex: "fullscreen_vertex")
@@ -92,17 +97,21 @@ public final class Compositor {
     /// video frame, so cached mip levels are rebuilt.
     public func encode(
         layout: FrameLayout, source: MTLTexture?, sourceChanged: Bool,
-        into target: MTLTexture, commandBuffer: MTLCommandBuffer, motion: MotionBlurFrame? = nil, mockup: MockupFrame? = nil
+        into target: MTLTexture, commandBuffer: MTLCommandBuffer, motion: MotionBlurFrame? = nil, mockup: MockupFrame? = nil,
+        webcam: MTLTexture? = nil
     ) {
+        webcamTexture = webcam
         if let mockup, let renderer = mockupRenderer {
             // Background only; the phone (with the recording on its screen) goes on top.
             encodeScene(layout: layout, source: nil, sourceChanged: false, into: target, commandBuffer: commandBuffer,
                         drawCursor: false, backgroundOnly: true)
             renderer.encode(mockup, source: source, sourceChanged: sourceChanged, into: target, commandBuffer: commandBuffer, compositor: self)
+            drawOverlays(layout, into: target, commandBuffer: commandBuffer)
             return
         }
         guard let motion, let scene = offscreen(&sceneTexture, like: target, format: target.pixelFormat) else {
             encodeScene(layout: layout, source: source, sourceChanged: sourceChanged, into: target, commandBuffer: commandBuffer, drawCursor: true)
+            drawOverlays(layout, into: target, commandBuffer: commandBuffer)
             return
         }
         let blurCursor = !motion.cursors.isEmpty
@@ -140,6 +149,75 @@ public final class Compositor {
             encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
         }
         encoder.endEncoding()
+        drawOverlays(layout, into: target, commandBuffer: commandBuffer)
+    }
+
+    // MARK: Overlays
+
+    /// Keystrokes and captions, in output pixels on top of everything.
+    private func drawOverlays(_ layout: FrameLayout, into target: MTLTexture, commandBuffer: MTLCommandBuffer) {
+        guard !layout.overlays.isEmpty || (layout.webcam != nil && webcamTexture != nil) else { return }
+        let pass = MTLRenderPassDescriptor()
+        pass.colorAttachments[0].texture = target
+        pass.colorAttachments[0].loadAction = .load
+        pass.colorAttachments[0].storeAction = .store
+        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else { return }
+        encoder.label = "Overlays"
+        let s = Float(Double(target.width) / max(layout.outputSize.width, 1))
+        var frame: [SIMD4<Float>] = [SIMD4(0, 0, s, 0), SIMD4(Float(target.width), Float(target.height), Float(layout.outputSize.width), Float(layout.outputSize.height))]
+        encoder.setVertexBytes(&frame, length: MemoryLayout<SIMD4<Float>>.stride * frame.count, index: 0)
+        encoder.setFragmentBytes(&frame, length: MemoryLayout<SIMD4<Float>>.stride * frame.count, index: 0)
+        encoder.setFragmentSamplerState(sampler, index: 0)
+        if let cam = layout.webcam, let texture = webcamTexture { drawWebcam(cam, texture: texture, encoder: encoder) }
+        encoder.setRenderPipelineState(cursorPipeline)
+        for overlay in layout.overlays where overlay.opacity > 0.001 {
+            guard let texture = overlayTexture(overlay.text) else { continue }
+            let w = Double(texture.width), h = Double(texture.height)
+            // The image includes shadow padding (half the font size) around the visible box.
+            let pad = overlay.text.fontSize * 0.5
+            let x = overlay.anchor.x - w / 2
+            let y = overlay.anchoredAtBottom ? overlay.anchor.y - h + pad + overlay.offsetY : overlay.anchor.y - pad - overlay.offsetY
+            var corners = Self.cornerVectors([CGPoint(x: x, y: y), CGPoint(x: x + w, y: y), CGPoint(x: x, y: y + h), CGPoint(x: x + w, y: y + h)])
+            encoder.setVertexBytes(&corners, length: MemoryLayout<SIMD4<Float>>.stride * 2, index: 1)
+            var params = SIMD4<Float>(Float(overlay.opacity), 0, 0, 0)
+            encoder.setFragmentBytes(&params, length: MemoryLayout<SIMD4<Float>>.stride, index: 1)
+            encoder.setFragmentTexture(texture, index: 0)
+            encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+        }
+        encoder.endEncoding()
+    }
+
+    private func drawWebcam(_ cam: FrameLayout.Webcam, texture: MTLTexture, encoder: MTLRenderCommandEncoder) {
+        // Soft shadow first.
+        encoder.setRenderPipelineState(shadowPipeline)
+        let sigma = cam.rect.height * 0.06
+        let caster = cam.rect.offsetBy(dx: 0, dy: sigma * 0.6)
+        var quad = rectVector(caster.insetBy(dx: -3 * sigma, dy: -3 * sigma))
+        encoder.setVertexBytes(&quad, length: MemoryLayout<SIMD4<Float>>.stride, index: 1)
+        var shadow: [SIMD4<Float>] = [rectVector(caster), SIMD4(Float(sigma), Float(cam.cornerRadius), 0.45, 0)]
+        encoder.setFragmentBytes(&shadow, length: MemoryLayout<SIMD4<Float>>.stride * shadow.count, index: 1)
+        encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+
+        encoder.setRenderPipelineState(webcamPipeline)
+        var rect = rectVector(cam.rect)
+        encoder.setVertexBytes(&rect, length: MemoryLayout<SIMD4<Float>>.stride, index: 1)
+        // Aspect fill the camera image into the bubble.
+        let ta = Double(texture.width) / Double(max(texture.height, 1)), ba = cam.rect.width / max(cam.rect.height, 1)
+        let fill: SIMD4<Float> = ta > ba
+            ? SIMD4(Float(ba / ta), 1, Float((1 - ba / ta) / 2), 0)
+            : SIMD4(1, Float(ta / ba), 0, Float((1 - ta / ba) / 2))
+        var uniforms: [SIMD4<Float>] = [rectVector(cam.rect), SIMD4(Float(cam.cornerRadius), cam.mirror ? 1 : 0, Float(cam.border), 0), fill]
+        encoder.setFragmentBytes(&uniforms, length: MemoryLayout<SIMD4<Float>>.stride * uniforms.count, index: 1)
+        encoder.setFragmentTexture(texture, index: 0)
+        encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+    }
+
+    private func overlayTexture(_ text: OverlayText) -> MTLTexture? {
+        if let t = overlayTextures[text] { return t }
+        guard let image = TextOverlayRasterizer.image(for: text), let texture = linearTexture(image) else { return nil }
+        if overlayTextures.count > 48 { overlayTextures.removeAll() }
+        overlayTextures[text] = texture
+        return texture
     }
 
     /// Averages the cursor over the shutter: each sample adds 1/N into a float layer.
@@ -248,12 +326,19 @@ public final class Compositor {
         var quad = rectVector(screen)
         encoder.setVertexBytes(&quad, length: MemoryLayout<SIMD4<Float>>.stride, index: 1)
         let crop = layout.sourceCrop
+        let regions = layout.redactions.prefix(8)
         var uniforms: [SIMD4<Float>] = [
             rectVector(screen),
             SIMD4(Float(crop.x), Float(crop.y), Float(crop.width), Float(crop.height)),
             SIMD4(Float(layout.cornerRadius), Float(filter), Float(screenTexture.width), Float(screenTexture.height)),
+            SIMD4(Float(regions.count), 0, 0, 0),
         ]
         encoder.setFragmentBytes(&uniforms, length: MemoryLayout<SIMD4<Float>>.stride * uniforms.count, index: 1)
+        var regionData: [SIMD4<Float>] = regions.flatMap { r in
+            [SIMD4(Float(r.rect.x), Float(r.rect.y), Float(r.rect.width), Float(r.rect.height)), SIMD4(r.style == .pixelate ? 1 : 0, 0, 0, 0)]
+        }
+        if regionData.isEmpty { regionData = [.zero] }
+        encoder.setFragmentBytes(&regionData, length: MemoryLayout<SIMD4<Float>>.stride * regionData.count, index: 2)
         encoder.setFragmentTexture(screenTexture, index: 0)
         encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
 
@@ -323,8 +408,15 @@ public final class Compositor {
         if let cached = cursorTextures[url] { return cached }
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
               let image = CGImageSourceCreateImageAtIndex(source, 0, nil),
-              let space = CGColorSpace(name: CGColorSpace.extendedLinearSRGB)
+              let texture = linearTexture(image)
         else { return nil }
+        cursorTextures[url] = texture
+        return texture
+    }
+
+    /// Premultiplied linear half-float texture with mips.
+    func linearTexture(_ image: CGImage) -> MTLTexture? {
+        guard let space = CGColorSpace(name: CGColorSpace.extendedLinearSRGB) else { return nil }
         let w = image.width, h = image.height
         var floats = [Float](repeating: 0, count: w * h * 4)
         let drawn: Bool = floats.withUnsafeMutableBytes { raw in
@@ -349,7 +441,6 @@ public final class Compositor {
             blit.endEncoding()
             buffer.commit()
         }
-        cursorTextures[url] = texture
         return texture
     }
 

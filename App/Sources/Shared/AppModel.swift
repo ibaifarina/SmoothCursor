@@ -11,6 +11,7 @@ final class AppModel {
     let library = ProjectLibrary()
     let permissions = PermissionCenter()
     let cursorPacks = CursorPackStore()
+    let styles = StyleStore()
     let exports = ExportQueue()
     let recorder: RecordingController
     var lastError: String?

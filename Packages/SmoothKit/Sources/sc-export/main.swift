@@ -22,6 +22,12 @@ if args.contains("--auto-camera") { project.cameraClips = MockupCamera.autoShots
 if args.contains("--motion") { project.motionBlur.enabled = true; project.motionBlur.amount = 0.5 }
 for c in project.cameraClips { print(String(format: "shot %-11@ %5.2f–%5.2f", c.preset.label, c.range.start, c.range.end)) }
 
+if args.contains("--transcribe") {
+    let video = ProjectPackage.mediaURL(project.recording.videoFile, in: package)
+    let captions = try await Transcriber.transcribe(videoURL: video, preferredTrack: nil, locale: Locale(identifier: value("--lang") ?? "en-US")) { print("  …", $0) }
+    for c in captions { print(String(format: "  %5.2f–%5.2f  %@", c.range.start, c.range.end, c.text)) }
+    exit(0)
+}
 var cursor: CursorTrack?
 if let file = project.recording.telemetryFile, let telemetry = try? Telemetry(decoding: Data(contentsOf: package.appending(path: file))) {
     var pack: CursorPack?, dir: URL?

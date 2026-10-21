@@ -16,6 +16,9 @@ public final class PlaybackController {
 
     @ObservationIgnored public let player: AVPlayer
     @ObservationIgnored let output: AVPlayerItemVideoOutput
+    /// Webcam recording, played in lockstep with the screen (same timeline).
+    @ObservationIgnored private var cameraPlayer: AVPlayer?
+    @ObservationIgnored private var cameraOutput: AVPlayerItemVideoOutput?
     /// Called when the preview should wake up (play, seek, new frame expected).
     @ObservationIgnored public var onActivity: (() -> Void)?
 
@@ -33,6 +36,22 @@ public final class PlaybackController {
     @ObservationIgnored private var resumeAfterScrub = false
 
     public var isSeeking: Bool { seekInFlight }
+
+    public convenience init(url: URL, cameraURL: URL?, duration: Seconds, fps: Double) {
+        self.init(url: url, duration: duration, fps: fps)
+        guard let cameraURL else { return }
+        let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+            kCVPixelBufferMetalCompatibilityKey as String: true,
+        ])
+        let item = AVPlayerItem(asset: AVURLAsset(url: cameraURL))
+        item.add(output)
+        let camera = AVPlayer(playerItem: item)
+        camera.isMuted = true
+        camera.actionAtItemEnd = .pause
+        cameraPlayer = camera
+        cameraOutput = output
+    }
 
     public init(url: URL, duration: Seconds, fps: Double) {
         self.duration = duration
@@ -70,8 +89,24 @@ public final class PlaybackController {
         }
     }
 
+    /// Applies per-track volumes (0 = silent) to playback.
+    public func setVolumes(_ volumes: [Double]) {
+        guard let item = player.currentItem else { return }
+        Task {
+            let tracks = (try? await item.asset.loadTracks(withMediaType: .audio)) ?? []
+            let mix = AVMutableAudioMix()
+            mix.inputParameters = tracks.enumerated().map { i, track in
+                let p = AVMutableAudioMixInputParameters(track: track)
+                p.setVolume(Float(i < volumes.count ? volumes[i] : 1), at: .zero)
+                return p
+            }
+            item.audioMix = mix
+        }
+    }
+
     public func invalidate() {
         player.pause()
+        cameraPlayer?.pause()
         if let boundaryObserver { player.removeTimeObserver(boundaryObserver) }
         boundaryObserver = nil
         statusObservation = nil
@@ -90,12 +125,14 @@ public final class PlaybackController {
         if !keptRanges.isEmpty, let next = Cuts.nextKeptTime(after: time, in: keptRanges), next != time { seek(to: next) }
         isPlaying = true
         player.play()
+        cameraPlayer?.play()
         onActivity?()
     }
 
     public func pause() {
         isPlaying = false
         player.pause()
+        cameraPlayer?.pause()
         time = min(max(player.currentTime().seconds, 0), duration)
         onActivity?()
     }
@@ -150,6 +187,7 @@ public final class PlaybackController {
         guard let target = pendingSeek else { return }
         pendingSeek = nil
         seekInFlight = true
+        cameraPlayer?.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
         player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
@@ -167,6 +205,17 @@ public final class PlaybackController {
         if !isPlaying { return time }
         let t = output.itemTime(forHostTime: hostTime)
         return t.isNumeric ? min(max(t.seconds, 0), duration) : time
+    }
+
+    /// Webcam frame for `itemTime`; nudges the camera player back in sync if it drifted.
+    public func newCameraPixelBuffer(forItemTime itemTime: Seconds) -> CVPixelBuffer? {
+        guard let cameraPlayer, let cameraOutput else { return nil }
+        if isPlaying, !seekInFlight, abs(cameraPlayer.currentTime().seconds - itemTime) > 0.1 {
+            cameraPlayer.seek(to: CMTime(seconds: itemTime, preferredTimescale: 60_000), toleranceBefore: .zero, toleranceAfter: .zero)
+        }
+        let t = CMTime(seconds: itemTime, preferredTimescale: 60_000)
+        guard cameraOutput.hasNewPixelBuffer(forItemTime: t) else { return nil }
+        return cameraOutput.copyPixelBuffer(forItemTime: t, itemTimeForDisplay: nil)
     }
 
     /// A newly decoded frame for `itemTime`, or nil if the current one is still valid.

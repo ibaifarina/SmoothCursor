@@ -25,6 +25,8 @@ final class CaptureWriter: @unchecked Sendable {
     private var sessionStarted = false
     private var lastVideo: CMSampleBuffer?
     private var lastVideoTime = CMTime.negativeInfinity
+    /// Secondary writers (the webcam) follow the screen's clock instead of starting it.
+    var startsClock = true
     private(set) var framesWritten = 0
     private(set) var framesDropped = 0
 
@@ -60,7 +62,7 @@ final class CaptureWriter: @unchecked Sendable {
 
     func appendVideo(_ sample: CMSampleBuffer) {
         let host = sample.presentationTimeStamp
-        if clock.startIfNeeded(at: host) {
+        if startsClock ? clock.startIfNeeded(at: host) : (!sessionStarted && clock.isStarted) {
             writer.startSession(atSourceTime: .zero)
             sessionStarted = true
         }

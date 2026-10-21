@@ -34,7 +34,8 @@ public struct Telemetry: Hashable, Sendable {
         case move = 0, mouseDown, mouseUp, rightDown, rightUp, scroll, keyDown, keyUp
     }
 
-    /// Fixed-size record. `code` = sprite index for moves, key code for keys; `modifiers` = CGEventFlags high bits.
+    /// Fixed-size record. `code` = sprite index for moves, key code for keys; `modifiers` = CGEventFlags.
+    /// For key events x is 0 and y holds the Unicode scalar the key produced (0 if none or older recordings).
     public struct Event: Hashable, Sendable {
         public var time: Seconds
         public var kind: Kind

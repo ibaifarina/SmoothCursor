@@ -349,6 +349,17 @@ private struct AudioSection: View {
                 )
                 .disabled(recorder.sourceKind == .iPhone)
             }
+            SCDivider(vertical: true).frame(height: 22)
+            HStack(spacing: 10) {
+                Label("Camera", systemImage: "video.fill").labelStyle(SCLabelStyle())
+                Spacer(minLength: 0)
+                SCDropdown(
+                    selection: $recorder.settings.cameraID,
+                    options: [SCDropdownOption(String?.none, "None", icon: "video.slash")]
+                        + recorder.catalog.cameras.map { SCDropdownOption(Optional($0.id), $0.name, icon: "video") },
+                    minWidth: 180, fill: true
+                )
+            }
         }
         .font(Typo.body)
     }

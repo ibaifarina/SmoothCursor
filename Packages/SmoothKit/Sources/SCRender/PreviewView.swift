@@ -15,6 +15,10 @@ public final class PreviewView: NSView {
         didSet { setNeedsRender() }
     }
 
+    public var keystrokeTrack: KeystrokeTrack? {
+        didSet { setNeedsRender() }
+    }
+
     /// Camera motion from zoom segments (nil = no zooms).
     public var cameraTrack: CameraTrack? {
         didSet { setNeedsRender() }
@@ -44,6 +48,7 @@ public final class PreviewView: NSView {
     private var compositor: Compositor?
     private var link: CADisplayLink?
     private var currentFrame: FrameTexture?
+    private var cameraFrame: FrameTexture?
     private var frameChanged = false
     private var dirty = true
     private var idleTicks = 0
@@ -118,6 +123,10 @@ public final class PreviewView: NSView {
                 frameChanged = true
                 dirty = true
             }
+            if let buffer = playback.newCameraPixelBuffer(forItemTime: time), let frame = context.makeTexture(from: buffer) {
+                cameraFrame = frame
+                dirty = true
+            }
         }
         let playing = playback?.isPlaying ?? false
         if dirty || playing {
@@ -140,7 +149,7 @@ public final class PreviewView: NSView {
         let size = metalLayer.drawableSize
         let layout = cropEditing
             ? FrameLayout.cropEditing(project: project, outputSize: size)
-            : FrameLayout.make(project: project, time: time, outputSize: size, cursor: cursorTrack, camera: cameraTrack)
+            : FrameLayout.make(project: project, time: time, outputSize: size, cursor: cursorTrack, camera: cameraTrack, keystrokes: keystrokeTrack)
         let motion = cropEditing ? nil : FrameLayout.motionBlur(
             project: project, time: time, outputSize: size, cursor: cursorTrack, camera: cameraTrack,
             frameDuration: 1 / Double(max(project.export.fps, 1)), quality: .preview
@@ -151,11 +160,11 @@ public final class PreviewView: NSView {
         )
         compositor.encode(
             layout: layout, source: currentFrame?.texture, sourceChanged: frameChanged,
-            into: drawable.texture, commandBuffer: commandBuffer, motion: motion, mockup: mockup
+            into: drawable.texture, commandBuffer: commandBuffer, motion: motion, mockup: mockup, webcam: cameraFrame?.texture
         )
         frameChanged = false
-        let frame = currentFrame
-        commandBuffer.addCompletedHandler { _ in withExtendedLifetime(frame) {} }
+        let frame = currentFrame, camera = cameraFrame
+        commandBuffer.addCompletedHandler { _ in withExtendedLifetime((frame, camera)) {} }
         commandBuffer.present(drawable)
         commandBuffer.commit()
     }

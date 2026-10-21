@@ -80,3 +80,20 @@ import Testing
         #expect(e.effectiveFPS == 30)
     }
 }
+
+@Suite struct IdleTrimTests {
+    @Test func removesTheMiddleOfLongIdleStretches() {
+        let p = Project(name: "T", recording: RecordingInfo(sourceKind: .display, videoFile: "v", pixelSize: PixelSize(width: 10, height: 10), displayScale: 1, fps: 60, duration: 20))
+        // Activity until 3 s, nothing until 12 s, then activity again.
+        var events: [Telemetry.Event] = []
+        for i in 0...30 { events.append(.init(time: Double(i) / 10, kind: .move, x: Float(i), y: 0)) }
+        for i in 120...200 { events.append(.init(time: Double(i) / 10, kind: .move, x: Float(i), y: 0)) }
+        let t = Telemetry(header: .init(targetSize: PixelSize(width: 100, height: 100), displayScale: 1), events: events)
+        let kept = IdleTrim.keptRanges(project: p, telemetry: t, peaks: [])
+        #expect(kept == [TimeRange(start: 0, end: 3.4), TimeRange(start: 11.6, end: 20)])
+        // Talking during the pause keeps it.
+        let speech = (0..<2000).map { i -> Float in (500...700).contains(i) ? 0.5 : 0 }
+        let withVoice = IdleTrim.keptRanges(project: p, telemetry: t, peaks: speech)
+        #expect(withVoice == [TimeRange(start: 0, end: 7.4), TimeRange(start: 11.6, end: 20)])
+    }
+}

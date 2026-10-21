@@ -17,11 +17,14 @@ struct CanvasStage: View {
             let size = FrameLayout.fit(aspect: aspect, in: CGRect(origin: .zero, size: geo.size)).size
             ZStack {
                 MetalPreview(
-                    project: project, playback: model.playback, cursorTrack: model.cursorTrack, cameraTrack: model.isPickingFocus ? nil : model.cameraTrack,
-                    cropEditing: model.isCropping, packageURL: model.packageURL
+                    project: project, playback: model.playback, cursorTrack: model.cursorTrack, cameraTrack: model.isPickingFocus || model.isDrawingRedaction ? nil : model.cameraTrack,
+                    keystrokeTrack: model.keystrokeTrack, cropEditing: model.isCropping, packageURL: model.packageURL
                 )
                 if model.isPickingFocus && !model.isCropping {
                     FocusPicker(project: project) { model.setFocus($0) }
+                }
+                if model.isDrawingRedaction && !model.isCropping {
+                    RedactionPicker(project: project) { model.addRedaction($0) }
                 }
                 if model.isCropping {
                     CropOverlay(
@@ -54,6 +57,7 @@ struct MetalPreview: NSViewRepresentable {
     let playback: PlaybackController?
     let cursorTrack: CursorTrack?
     let cameraTrack: CameraTrack?
+    let keystrokeTrack: KeystrokeTrack?
     let cropEditing: Bool
     let packageURL: URL
 
@@ -71,6 +75,7 @@ struct MetalPreview: NSViewRepresentable {
         view.playback = playback
         view.cursorTrack = cursorTrack
         view.cameraTrack = cameraTrack
+        view.keystrokeTrack = keystrokeTrack
         view.cropEditing = cropEditing
         view.project = project
     }
@@ -116,6 +121,61 @@ private struct FocusPicker: View {
             }
             .pointerStyle(.rectSelection)
         }
+    }
+}
+
+// MARK: - Blur regions
+
+/// Drag a rectangle on the (unzoomed) recording to add a blur region.
+private struct RedactionPicker: View {
+    let project: Project
+    let add: (UnitRect) -> Void
+    @State private var drag: (start: CGPoint, end: CGPoint)?
+
+    var body: some View {
+        GeometryReader { geo in
+            let layout = FrameLayout.base(project: project, outputSize: geo.size)
+            ZStack(alignment: .topLeading) {
+                Color.black.opacity(0.2)
+                if let drag {
+                    let r = rect(drag.start, drag.end, in: layout.screenRect)
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(.ultraThinMaterial)
+                        .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Palette.accent, style: StrokeStyle(lineWidth: 1.5, dash: [6, 4])))
+                        .frame(width: r.width, height: r.height)
+                        .offset(x: r.minX, y: r.minY)
+                }
+                Text("Drag over what should be hidden · Esc to cancel")
+                    .font(Typo.label)
+                    .padding(.horizontal, 10).frame(height: 26)
+                    .background(Palette.surface, in: .capsule)
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 12)
+            }
+            .contentShape(.rect)
+            .gesture(
+                DragGesture(minimumDistance: 2)
+                    .onChanged { g in drag = (g.startLocation, g.location) }
+                    .onEnded { g in
+                        defer { drag = nil }
+                        let s = layout.screenRect, crop = layout.sourceCrop
+                        let r = rect(g.startLocation, g.location, in: s)
+                        guard s.width > 0, s.height > 0, r.width > 6, r.height > 6 else { return }
+                        add(UnitRect(
+                            x: crop.x + (r.minX - s.minX) / s.width * crop.width,
+                            y: crop.y + (r.minY - s.minY) / s.height * crop.height,
+                            width: r.width / s.width * crop.width,
+                            height: r.height / s.height * crop.height
+                        ))
+                    }
+            )
+            .pointerStyle(.rectSelection)
+        }
+    }
+
+    /// The dragged rectangle, kept inside the recording.
+    private func rect(_ a: CGPoint, _ b: CGPoint, in bounds: CGRect) -> CGRect {
+        CGRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(a.x - b.x), height: abs(a.y - b.y)).intersection(bounds)
     }
 }
 

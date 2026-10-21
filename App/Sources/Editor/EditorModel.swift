@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import Observation
 import SCCore
 import SCProject
@@ -6,7 +7,7 @@ import SCRender
 import SwiftUI
 
 enum InspectorTab: String, CaseIterable, Identifiable {
-    case background, cursor, zoom, mockup, export
+    case background, cursor, zoom, mockup, overlays, audio, export
     var id: String { rawValue }
 
     var symbol: String {
@@ -15,6 +16,8 @@ enum InspectorTab: String, CaseIterable, Identifiable {
         case .cursor: "cursorarrow"
         case .zoom: "plus.magnifyingglass"
         case .mockup: "iphone"
+        case .overlays: "text.bubble"
+        case .audio: "speaker.wave.2"
         case .export: "square.and.arrow.up"
         }
     }
@@ -51,6 +54,14 @@ final class EditorModel {
     private(set) var waveform: [Float] = []
     /// While true, a click on the canvas sets the fixed focus of the selected zooms.
     var isPickingFocus = false
+    /// While true, dragging on the canvas adds a blur region.
+    var isDrawingRedaction = false
+    private(set) var keystrokeTrack: KeystrokeTrack?
+    /// Names of the recording's audio tracks, in order.
+    private(set) var audioTrackNames: [String] = []
+    /// Caption generation status shown in the inspector (nil when idle).
+    var captionStatus: String?
+    var captionError: String?
 
     @ObservationIgnored weak var undoManager: UndoManager?
     /// Consecutive edits with the same name inside this window become one undo step (slider drags).
@@ -101,8 +112,12 @@ final class EditorModel {
             }
             playback = PlaybackController(
                 url: ProjectPackage.mediaURL(loaded.recording.videoFile, in: url),
+                cameraURL: loaded.recording.cameraFile.map { url.appending(path: $0) },
                 duration: loaded.recording.duration, fps: loaded.recording.fps
             )
+            rebuildKeystrokeTrack()
+            await loadAudioTrackNames()
+            syncVolumes()
             syncPlaybackCuts()
             #if DEBUG
             if ProcessInfo.processInfo.environment["SC_AUTOPLAY"] != nil { playback?.play() }
@@ -172,6 +187,76 @@ final class EditorModel {
         cameraTrack = project.zooms.isEmpty ? nil : CameraTrack(project: project, cursor: cursorTrack)
     }
 
+    private func rebuildKeystrokeTrack() {
+        guard let project, let telemetry else { keystrokeTrack = nil; return }
+        keystrokeTrack = KeystrokeTrack(telemetry: telemetry, settings: project.keystrokes)
+    }
+
+    /// Whether the recording has any keyboard data (needs Accessibility while recording).
+    var hasKeyData: Bool { telemetry?.events.contains { $0.kind == .keyDown } ?? false }
+
+    private func syncVolumes() {
+        guard let project else { return }
+        playback?.setVolumes(audioTrackNames.indices.map { project.audio.volume(track: $0) })
+    }
+
+    private func loadAudioTrackNames() async {
+        guard let project else { return }
+        if let known = project.recording.audioTracks {
+            audioTrackNames = known.map(\.name)
+            return
+        }
+        let asset = AVURLAsset(url: ProjectPackage.mediaURL(project.recording.videoFile, in: packageURL))
+        let count = (try? await asset.loadTracks(withMediaType: .audio).count) ?? 0
+        audioTrackNames = count == 1 ? ["Audio"] : (0..<count).map { "Audio \($0 + 1)" }
+    }
+
+    // MARK: Extras
+
+    /// Removes long stretches where nothing happens (no movement, input or sound).
+    func trimIdle() {
+        guard let project else { return }
+        let kept = IdleTrim.keptRanges(project: project, telemetry: telemetry, peaks: waveform)
+        let removed = Cuts.editedDuration(project) - kept.map(\.duration).reduce(0, +)
+        guard removed > 0.2 else { idleTrimMessage = "No idle parts found."; return }
+        update("Trim Idle Parts") { $0.cuts = kept }
+        idleTrimMessage = String(format: "Removed %.1f s of idle time.", removed)
+    }
+
+    var idleTrimMessage: String?
+
+    func generateCaptions(language: String) async {
+        guard let project else { return }
+        captionError = nil
+        captionStatus = "Starting…"
+        let video = ProjectPackage.mediaURL(project.recording.videoFile, in: packageURL)
+        // Narration usually lives on the microphone track.
+        let mic = project.recording.audioTracks?.firstIndex { $0.kind == .microphone }
+        do {
+            let segments = try await Transcriber.transcribe(videoURL: video, preferredTrack: mic, locale: Locale(identifier: language)) { status in
+                Task { @MainActor in self.captionStatus = status }
+            }
+            update("Generate Captions") {
+                $0.captionSegments = segments
+                $0.captions.enabled = true
+                $0.captions.language = language
+            }
+            captionStatus = nil
+            if segments.isEmpty { captionError = "No speech was found." }
+        } catch {
+            captionStatus = nil
+            captionError = error.localizedDescription
+        }
+    }
+
+    func addRedaction(_ rect: UnitRect) {
+        guard let project else { return }
+        update("Add Blur Region") {
+            $0.redactions.append(RedactRegion(range: TimeRange(start: 0, end: project.recording.duration), rect: rect))
+        }
+        isDrawingRedaction = false
+    }
+
     private func syncPlaybackCuts() {
         guard let project else { return }
         playback?.keptRanges = project.cuts.isEmpty ? [] : Cuts.kept(project)
@@ -211,6 +296,7 @@ final class EditorModel {
     }
 
     func clearSelection() {
+        isDrawingRedaction = false
         selectedZooms = []
         selectedShots = []
         selectedClip = nil
@@ -320,6 +406,8 @@ final class EditorModel {
             rebuildCameraTrack()
         }
         if old?.cuts != next.cuts { syncPlaybackCuts() }
+        if old?.keystrokes != next.keystrokes { rebuildKeystrokeTrack() }
+        if old?.audio != next.audio { syncVolumes() }
         // Drop selections that no longer exist (undo, delete).
         selectedZooms.formIntersection(next.zooms.map(\.id))
         selectedShots.formIntersection(next.cameraClips.map(\.id))

@@ -16,10 +16,11 @@ public struct ExportRequest: Sendable {
     public var destination: URL
     public var cursor: CursorTrack?
     public var camera: CameraTrack?
+    public var keystrokes: KeystrokeTrack?
 
-    public init(project: Project, packageURL: URL, destination: URL, cursor: CursorTrack?, camera: CameraTrack?) {
+    public init(project: Project, packageURL: URL, destination: URL, cursor: CursorTrack?, camera: CameraTrack?, keystrokes: KeystrokeTrack? = nil) {
         self.project = project; self.packageURL = packageURL; self.destination = destination
-        self.cursor = cursor; self.camera = camera
+        self.cursor = cursor; self.camera = camera; self.keystrokes = keystrokes
     }
 }
 
@@ -120,11 +121,35 @@ public final class ExportSession: @unchecked Sendable {
         return Media(composition: composition, video: video, audio: audio.map(\.0), kept: kept, duration: at.seconds)
     }
 
+    /// Webcam frames on the output timeline (same cuts as the screen), if there is a webcam recording.
+    private func cameraStream(kept: [TimeRange]) async throws -> (FrameStream, AVAssetReader)? {
+        let project = request.project
+        guard project.webcam.visible, let file = project.recording.cameraFile else { return nil }
+        let asset = AVURLAsset(url: request.packageURL.appending(path: file))
+        guard let track = try await asset.loadTracks(withMediaType: .video).first else { return nil }
+        let trackRange = try await track.load(.timeRange)
+        let composition = AVMutableComposition()
+        guard let video = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) else { return nil }
+        var at = CMTime.zero
+        for r in kept {
+            let range = CMTimeRange(start: CMTime(seconds: r.start, preferredTimescale: 60_000), end: CMTime(seconds: r.end, preferredTimescale: 60_000))
+            let part = range.intersection(trackRange)
+            if part.duration > .zero { try video.insertTimeRange(part, of: track, at: at + (part.start - range.start)) }
+            at = at + range.duration
+        }
+        let reader = try AVAssetReader(asset: composition)
+        let output = AVAssetReaderTrackOutput(track: video, outputSettings: rendererPixelBufferAttributes)
+        output.alwaysCopiesSampleData = false
+        reader.add(output)
+        guard reader.startReading() else { return nil }
+        return (FrameStream(output: output), reader)
+    }
+
     /// Frame layout and motion blur for output time `t`.
     private func frame(at t: Seconds, kept: [TimeRange], size: CGSize, fps: Int) -> (FrameLayout, MotionBlurFrame?, MockupFrame?) {
         let project = request.project
         let source = Cuts.sourceTime(forOutput: t, in: kept)
-        let layout = FrameLayout.make(project: project, time: source, outputSize: size, cursor: request.cursor, camera: request.camera)
+        let layout = FrameLayout.make(project: project, time: source, outputSize: size, cursor: request.cursor, camera: request.camera, keystrokes: request.keystrokes)
         let motion = FrameLayout.motionBlur(
             project: project, time: source, outputSize: size, cursor: request.cursor, camera: request.camera,
             frameDuration: 1 / Double(fps), quality: .export
@@ -172,7 +197,8 @@ public final class ExportSession: @unchecked Sendable {
 
         let clicks = clickTimes(kept: media.kept)
         let audioSource: AudioSource? = if !media.audio.isEmpty {
-            try AudioSource(tracks: media.audio, composition: media.composition, clicks: clicks)
+            try AudioSource(tracks: media.audio, composition: media.composition, clicks: clicks,
+                            volumes: media.audio.indices.map { project.audio.volume(track: $0) })
         } else if !clicks.isEmpty {
             AudioSource(synthesizing: media.duration, clicks: clicks)
         } else {
@@ -200,6 +226,7 @@ public final class ExportSession: @unchecked Sendable {
         writer.startSession(atSourceTime: .zero)
 
         let frames = FrameStream(output: videoOutput)
+        let camera = try await cameraStream(kept: media.kept)
         let videoQueue = DispatchQueue(label: "smoothcursor.export.video", qos: .userInitiated)
         let audioQueue = DispatchQueue(label: "smoothcursor.export.audio", qos: .userInitiated)
         nonisolated(unsafe) var index = 0
@@ -226,14 +253,16 @@ public final class ExportSession: @unchecked Sendable {
                             }
                             let source = frames.frame(at: t)
                             let sourceTexture = source.flatMap { context.makeTexture(from: $0) }
+                            let cameraTexture = camera?.0.frame(at: t).flatMap { context.makeTexture(from: $0) }
                             let (layout, motion, mockup) = self.frame(at: t, kept: media.kept, size: size, fps: fps)
                             compositor.encode(
                                 layout: layout, source: sourceTexture?.texture, sourceChanged: frames.changed,
-                                into: target.texture, commandBuffer: commandBuffer, motion: motion, mockup: mockup
+                                into: target.texture, commandBuffer: commandBuffer, motion: motion, mockup: mockup,
+                                webcam: cameraTexture?.texture
                             )
                             commandBuffer.commit()
                             commandBuffer.waitUntilCompleted()
-                            withExtendedLifetime((sourceTexture, target)) {}
+                            withExtendedLifetime((sourceTexture, target, cameraTexture)) {}
                             if !adaptor.append(buffer, withPresentationTime: CMTime(value: CMTimeValue(index), timescale: CMTimeScale(fps))) {
                                 failure = writer.error ?? ExportError.writer("append")
                             }
@@ -263,6 +292,7 @@ public final class ExportSession: @unchecked Sendable {
         }
 
         reader.cancelReading()
+        camera?.1.cancelReading()
         audioSource?.stop()
         if isCancelled { writer.cancelWriting(); throw ExportError.cancelled }
         if let failure { writer.cancelWriting(); throw failure }
@@ -343,11 +373,14 @@ public final class ExportSession: @unchecked Sendable {
         ] as CFDictionary
 
         let frames = FrameStream(output: output)
+        let camera = try await cameraStream(kept: media.kept)
+        defer { camera?.1.cancelReading() }
         for index in 0..<total {
             if isCancelled { throw ExportError.cancelled }
             let t = Double(index) * delay
             let (layout, motion, mockup) = frame(at: t, kept: media.kept, size: size, fps: fps)
-            let image = try renderer.render(layout: layout, source: frames.frame(at: t), motion: motion, mockup: mockup)
+            let image = try renderer.render(layout: layout, source: frames.frame(at: t), motion: motion, mockup: mockup,
+                                            webcam: camera?.0.frame(at: t))
             CGImageDestinationAddImage(destination, image, frameProperties)
             if index % 3 == 0 || index == total - 1 { progress(ExportProgress(framesRendered: index + 1, totalFrames: total)) }
         }

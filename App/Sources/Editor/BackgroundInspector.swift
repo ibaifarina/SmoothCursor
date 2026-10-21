@@ -37,6 +37,8 @@ struct BackgroundInspector: View {
     private var background: Background { model.project?.canvas.background ?? .default }
 
     var body: some View {
+        StylesSection(model: model)
+
         VStack(alignment: .leading, spacing: 14) {
             SCSectionHeader("Background")
             SCSegmented(selection: Binding(get: { kind }, set: { switchKind($0) }), options: [

@@ -49,6 +49,19 @@ public struct FrameLayout: Equatable, Sendable {
     public var backgroundNoise: Double
     public var cursor: Cursor?
     public var clickEffects: [ClickEffect] = []
+    /// Screen-space overlays (keystrokes, captions), unaffected by the camera.
+    public var overlays: [Overlay] = []
+    /// Regions of the recording hidden at this moment.
+    public var redactions: [RedactRegion] = []
+    /// Webcam bubble, in output pixels.
+    public var webcam: Webcam?
+
+    public struct Webcam: Equatable, Sendable {
+        public var rect: CGRect
+        public var cornerRadius: Double
+        public var mirror: Bool
+        public var border: Double
+    }
 
     /// Visible part of the canvas.
     public var visibleCanvasRect: CGRect {
@@ -77,9 +90,13 @@ public struct FrameLayout: Equatable, Sendable {
     /// Full frame: layout, camera (from `camera`, identity if nil) and cursor (if `cursor` is given).
     public static func make(
         project: Project, time: Seconds, outputSize: CGSize,
-        cursor track: CursorTrack? = nil, camera: CameraTrack? = nil
+        cursor track: CursorTrack? = nil, camera: CameraTrack? = nil, keystrokes: KeystrokeTrack? = nil
     ) -> FrameLayout {
         var layout = base(project: project, outputSize: outputSize)
+        layout.overlays = overlays(project: project, time: time, outputSize: outputSize, keystrokes: keystrokes)
+        layout.redactions = project.redactions.filter { $0.range.contains(time) }
+        let zoomScale = (!project.mockup.isEnabled ? camera?.camera(at: time, outputSize: outputSize).scale : nil) ?? 1
+        layout.webcam = webcamLayout(project: project, outputSize: outputSize, zoomScale: zoomScale)
         // With a device mockup the phone carries the recording: no flat zoom, cursor lives on the screen.
         guard !project.mockup.isEnabled else { return layout }
         if let camera { layout.camera = camera.camera(at: time, outputSize: outputSize) }
@@ -87,6 +104,21 @@ public struct FrameLayout: Equatable, Sendable {
             layout.placeCursor(track: track, time: time, toCanvas: layout.mapping(targetSize: track.targetSize), settings: project.cursor)
         }
         return layout
+    }
+
+    static func webcamLayout(project: Project, outputSize: CGSize, zoomScale: Double) -> Webcam? {
+        let w = project.webcam
+        guard w.visible, project.recording.cameraFile != nil else { return nil }
+        let short = min(outputSize.width, outputSize.height)
+        // Steps aside a little while zoomed in.
+        let shrink = w.shrinkDuringZoom ? 1 - 0.3 * min(max(zoomScale - 1, 0), 1) : 1
+        let side = short * w.size * shrink
+        let size = w.shape == .circle ? CGSize(width: side, height: side) : CGSize(width: side * 1.33, height: side)
+        let margin = short * 0.035
+        let x = (w.corner == .topLeft || w.corner == .bottomLeft) ? margin : outputSize.width - margin - size.width
+        let y = (w.corner == .topLeft || w.corner == .topRight) ? margin : outputSize.height - margin - size.height
+        return Webcam(rect: CGRect(origin: CGPoint(x: x, y: y), size: size),
+                      cornerRadius: w.shape == .circle ? side / 2 : side * 0.18, mirror: w.mirror, border: max(short * 0.0025, 1))
     }
 
     /// Static layout (no camera motion, no cursor).

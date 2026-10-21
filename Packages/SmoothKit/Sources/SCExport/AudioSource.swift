@@ -23,9 +23,16 @@ final class AudioSource: @unchecked Sendable {
     private var synthesizedFrames = 0
     private lazy var format: CMAudioFormatDescription? = Self.makeFormat()
 
-    init(tracks: [AVAssetTrack], composition: AVAsset, clicks: [Seconds]) throws {
+    init(tracks: [AVAssetTrack], composition: AVAsset, clicks: [Seconds], volumes: [Double]) throws {
         let reader = try AVAssetReader(asset: composition)
         let output = AVAssetReaderAudioMixOutput(audioTracks: tracks, audioSettings: Self.settings)
+        let mix = AVMutableAudioMix()
+        mix.inputParameters = tracks.enumerated().map { i, track in
+            let p = AVMutableAudioMixInputParameters(track: track)
+            p.setVolume(Float(i < volumes.count ? volumes[i] : 1), at: .zero)
+            return p
+        }
+        output.audioMix = mix
         reader.add(output)
         self.reader = reader
         self.output = output

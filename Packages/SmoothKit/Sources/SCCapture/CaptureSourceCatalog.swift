@@ -35,6 +35,7 @@ public final class CaptureSourceCatalog {
     public private(set) var windows: [WindowSource] = []
     public private(set) var microphones: [InputDeviceSource] = []
     public private(set) var iOSDevices: [InputDeviceSource] = []
+    public private(set) var cameras: [InputDeviceSource] = []
     public private(set) var thumbnails: [String: CGImage] = [:]
     public private(set) var lastError: String?
 
@@ -84,6 +85,9 @@ public final class CaptureSourceCatalog {
             deviceTypes: [.microphone, .external], mediaType: .audio, position: .unspecified
         ).devices.map { InputDeviceSource(id: $0.uniqueID, name: $0.localizedName) }
         iOSDevices = DeviceCaptureEngine.availableDevices().map { InputDeviceSource(id: $0.uniqueID, name: $0.localizedName) }
+        cameras = AVCaptureDevice.DiscoverySession(
+            deviceTypes: [.builtInWideAngleCamera, .external, .continuityCamera], mediaType: .video, position: .unspecified
+        ).devices.map { InputDeviceSource(id: $0.uniqueID, name: $0.localizedName) }
     }
 
     public static func thumbnailKey(display id: CGDirectDisplayID) -> String { "d\(id)" }

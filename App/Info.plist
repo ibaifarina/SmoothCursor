@@ -43,6 +43,8 @@
 	<string>Smooth Cursor can record your camera as an overlay in your videos.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Smooth Cursor records your microphone to narrate your screen recordings.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Smooth Cursor transcribes your narration on this Mac to make captions.</string>
 	<key>UTExportedTypeDeclarations</key>
 	<array>
 		<dict>

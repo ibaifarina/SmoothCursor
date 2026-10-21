@@ -173,7 +173,27 @@ struct ScreenUniforms {
     float4 rect;    // canvas rect
     float4 crop;    // uv origin, uv size
     float4 params;  // x corner radius, y filter (0 bilinear, 1 trilinear, 2 bicubic), zw texture size
+    float4 extra;   // x number of redaction regions
 };
+
+// Hidden regions: pixelated blocks or a wide blur (uv space of the source).
+static float3 redact(texture2d<float> tex, sampler smp, float2 uv, float2 texSize, float4 r, float style) {
+    float aspect = texSize.x / texSize.y;
+    if (style > 0.5) {
+        float2 cell = float2(0.014 / aspect, 0.014);
+        float2 q = (floor((uv - r.xy) / cell) + 0.5) * cell + r.xy;
+        return tex.sample(smp, clamp(q, r.xy, r.xy + r.zw), level(0)).rgb;
+    }
+    float3 sum = 0.0;
+    float radius = 0.018;
+    for (int i = 0; i < 24; i++) {
+        float a = float(i) * 2.39996; // golden angle
+        float d = sqrt((float(i) + 0.5) / 24.0) * radius;
+        float2 o = float2(cos(a) / aspect, sin(a)) * d;
+        sum += tex.sample(smp, clamp(uv + o, r.xy, r.xy + r.zw), bias(3.0)).rgb;
+    }
+    return sum / 24.0;
+}
 
 // 9-tap Catmull-Rom using bilinear taps (MJP). Sharper than bilinear when magnifying.
 static float3 sample_catmull_rom(texture2d<float> tex, sampler smp, float2 uv, float2 texSize) {
@@ -205,6 +225,7 @@ static float3 sample_catmull_rom(texture2d<float> tex, sampler smp, float2 uv, f
 fragment float4 screen_fragment(VOut in [[stage_in]],
                                 constant FrameUniforms &frame [[buffer(0)]],
                                 constant ScreenUniforms &s [[buffer(1)]],
+                                constant float4 *regions [[buffer(2)]],
                                 texture2d<float> tex [[texture(0)]],
                                 sampler smp [[sampler(0)]]) {
     float2 halfSize = s.rect.zw * 0.5;
@@ -214,6 +235,14 @@ fragment float4 screen_fragment(VOut in [[stage_in]],
     if (alpha <= 0.0) discard_fragment();
     float2 uv = s.crop.xy + (in.canvas - s.rect.xy) / s.rect.zw * s.crop.zw;
     float3 rgb = s.params.y > 1.5 ? sample_catmull_rom(tex, smp, uv, s.params.zw) : tex.sample(smp, uv).rgb;
+    int count = int(s.extra.x);
+    for (int i = 0; i < count; i++) {
+        float4 r = regions[i * 2];
+        if (all(uv >= r.xy) && all(uv <= r.xy + r.zw)) {
+            rgb = redact(tex, smp, uv, s.params.zw, r, regions[i * 2 + 1].x);
+            break;
+        }
+    }
     return float4(rgb * alpha, alpha);
 }
 // MARK: - Cursor
@@ -323,6 +352,32 @@ fragment float4 layer_fragment(FullscreenOut in [[stage_in]],
                                sampler smp [[sampler(0)]]) {
     return layer.sample(smp, in.uv);
 }
+// MARK: - Webcam
+
+struct WebcamUniforms {
+    float4 rect;     // output px
+    float4 params;   // x corner radius, y mirror, z border px
+    float4 fill;     // uv = local * xy + zw (aspect fill)
+};
+
+fragment float4 webcam_fragment(VOut in [[stage_in]],
+                                constant FrameUniforms &frame [[buffer(0)]],
+                                constant WebcamUniforms &u [[buffer(1)]],
+                                texture2d<float> tex [[texture(0)]],
+                                sampler smp [[sampler(0)]]) {
+    float2 halfSize = u.rect.zw * 0.5;
+    float d = sd_rounded_box(in.canvas - (u.rect.xy + halfSize), halfSize, u.params.x);
+    float alpha = saturate(0.5 - d * frame.camera.z);
+    if (alpha <= 0.0) discard_fragment();
+    float2 local = (in.canvas - u.rect.xy) / u.rect.zw;
+    if (u.params.y > 0.5) local.x = 1.0 - local.x;
+    float3 rgb = tex.sample(smp, local * u.fill.xy + u.fill.zw).rgb;
+    // Thin light rim.
+    float rim = saturate(1.0 - abs(d + u.params.z * 0.5) / (u.params.z * 0.5 + 0.5));
+    rgb = mix(rgb, float3(1.0), rim * 0.55);
+    return float4(rgb * alpha, alpha);
+}
+
 // MARK: - Mockup: environment
 
 constant float PI_F = 3.14159265358979;

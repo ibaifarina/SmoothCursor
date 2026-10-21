@@ -54,6 +54,24 @@ if let shot = value("--shot").flatMap(CameraPreset.init(rawValue:)) {
     project.cameraClips = [CameraClip(range: TimeRange(start: 0, end: project.recording.duration), preset: shot,
                                       focus: f.map { UnitPoint2D(x: $0[0], y: $0[1]) })]
 }
+var keystrokes: KeystrokeTrack?
+if args.contains("--keys") {
+    project.keystrokes.enabled = true
+    if args.contains("--light-keys") { project.keystrokes.lightStyle = true }
+    let fake = Telemetry(header: .init(targetSize: PixelSize(width: 100, height: 100), displayScale: 1), events: [
+        .init(time: time - 0.3, kind: .keyDown, x: 0, y: Float(("k" as Unicode.Scalar).value), code: 40, modifiers: UInt32(0x120000)),
+    ])
+    keystrokes = KeystrokeTrack(telemetry: fake, settings: project.keystrokes)
+}
+if let caption = value("--caption") {
+    project.captions.enabled = true
+    project.captions.boxed = !args.contains("--bare-caption")
+    project.captionSegments = [CaptionSegment(range: TimeRange(start: 0, end: project.recording.duration), text: caption)]
+}
+if let r = value("--redact").map(numbers), r.count == 4 {
+    project.redactions = [RedactRegion(range: TimeRange(start: 0, end: project.recording.duration), rect: UnitRect(x: r[0], y: r[1], width: r[2], height: r[3]),
+                                       style: args.contains("--pixelate") ? .pixelate : .blur)]
+}
 if let m = value("--motion").flatMap(Double.init) { project.motionBlur.enabled = m > 0; project.motionBlur.amount = m }
 if let p = value("--padding").flatMap(Double.init) { project.canvas.padding = p }
 if let r = value("--radius").flatMap(Double.init) { project.canvas.cornerRadius = r }
@@ -97,7 +115,7 @@ let aspect = args.contains("--crop-mode") ? project.recording.pixelSize.aspect :
 let size = CGSize(width: (height * aspect).rounded(), height: height)
 let layout = args.contains("--crop-mode")
     ? FrameLayout.cropEditing(project: project, outputSize: size)
-    : FrameLayout.make(project: project, time: time, outputSize: size, cursor: track, camera: cameraTrack)
+    : FrameLayout.make(project: project, time: time, outputSize: size, cursor: track, camera: cameraTrack, keystrokes: keystrokes)
 
 guard let context = MetalContext.shared else { print("no Metal"); exit(1) }
 let renderer = try OfflineRenderer(context: context)

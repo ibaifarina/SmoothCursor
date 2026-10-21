@@ -35,6 +35,7 @@ targets:
         LSApplicationCategoryType: public.app-category.video
         NSMicrophoneUsageDescription: Smooth Cursor records your microphone to narrate your screen recordings.
         NSCameraUsageDescription: Smooth Cursor can record your camera as an overlay in your videos.
+        NSSpeechRecognitionUsageDescription: Smooth Cursor transcribes your narration on this Mac to make captions.
         UTExportedTypeDeclarations:
           - UTTypeIdentifier: com.smoothcursor.project
             UTTypeDescription: Smooth Cursor Project

@@ -24,6 +24,12 @@ public struct Project: Codable, Hashable, Identifiable, Sendable {
     /// Kept ranges of the source; empty = whole recording.
     public var cuts: [TimeRange] = []
     public var export = ExportSettings()
+    public var audio = AudioSettings()
+    public var keystrokes = KeystrokeSettings()
+    public var captions = CaptionSettings()
+    public var captionSegments: [CaptionSegment] = []
+    public var redactions: [RedactRegion] = []
+    public var webcam = WebcamSettings()
 
     public init(id: UUID = UUID(), name: String, recording: RecordingInfo, createdAt: Date = .now) {
         self.id = id

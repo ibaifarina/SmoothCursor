@@ -83,7 +83,9 @@ public final class ProjectLibrary {
     }
 
     public func finalizeProject(at url: URL, name: String, recording: RecordingInfo) throws {
-        try ProjectPackage.write(Project(name: name, recording: recording), to: url)
+        var project = Project(name: name, recording: recording)
+        StyleStore.loadDefault()?.apply(to: &project)
+        try ProjectPackage.write(project, to: url)
         active.remove(url)
         reload()
     }

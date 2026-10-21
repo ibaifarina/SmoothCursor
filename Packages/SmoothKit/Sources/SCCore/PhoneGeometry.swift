@@ -80,6 +80,7 @@ extension FrameLayout {
             outputSize: size, screenRect: CGRect(origin: .zero, size: size), cornerRadius: 0, shadow: nil,
             sourceCrop: crop, camera: .identity, background: .color(.black), backgroundNoise: 0
         )
+        screen.redactions = project.redactions.filter { $0.range.contains(time) }
         if let cursor {
             screen.placeCursor(track: cursor, time: time, toCanvas: screen.mapping(targetSize: cursor.targetSize), settings: project.cursor)
         }

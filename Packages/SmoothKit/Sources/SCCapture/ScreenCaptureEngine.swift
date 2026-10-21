@@ -15,6 +15,7 @@ public final class ScreenCaptureEngine: NSObject, RecordingEngine, @unchecked Se
     private var stream: SCStream?
     private var writer: CaptureWriter?
     private var telemetry: InputTelemetryRecorder?
+    private var camera: CameraRecorder?
     private var packageURL: URL?
     private var info: RecordingInfo?
 
@@ -101,11 +102,16 @@ public final class ScreenCaptureEngine: NSObject, RecordingEngine, @unchecked Se
         )
         info?.audioTracks = audioTracks
 
+        if let cameraID = settings.cameraID {
+            camera = try? CameraRecorder(deviceID: cameraID, packageURL: packageURL, clock: clock)
+        }
         telemetry.start()
         do {
             try await stream.startCapture()
+            camera?.start()
         } catch {
             _ = telemetry.stop()
+            camera?.cancel()
             writer.cancel()
             throw error
         }
@@ -118,6 +124,8 @@ public final class ScreenCaptureEngine: NSObject, RecordingEngine, @unchecked Se
         let telemetryData = telemetry?.stop()
         let duration = try await onQueue { try await writer.finish(end: end) }
         self.stream = nil
+        if let camera, await camera.stop(end: end) { info.cameraFile = CameraRecorder.file }
+        camera = nil
 
         info.duration = duration.seconds
         if let telemetryData {
@@ -132,6 +140,8 @@ public final class ScreenCaptureEngine: NSObject, RecordingEngine, @unchecked Se
     }
 
     public func cancel() async {
+        camera?.cancel()
+        camera = nil
         try? await stream?.stopCapture()
         _ = telemetry?.stop()
         if let writer { await onQueue { writer.cancel() } }

@@ -177,7 +177,7 @@ struct ExportInspector: View {
             await model.flush()
             app.exports.enqueue(
                 ExportRequest(project: project, packageURL: model.packageURL, destination: url,
-                              cursor: model.cursorTrack, camera: model.cameraTrack),
+                              cursor: model.cursorTrack, camera: model.cameraTrack, keystrokes: model.keystrokeTrack),
                 name: url.lastPathComponent
             )
         }
