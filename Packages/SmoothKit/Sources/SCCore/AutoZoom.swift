@@ -55,7 +55,8 @@ public enum AutoZoom {
                 transitionIn: transitionIn,
                 transitionOut: transitionOut,
                 followSpring: .gentle,
-                origin: .auto
+                origin: .auto,
+                staysInRecording: settings.staysInRecording
             ))
         }
         return segments

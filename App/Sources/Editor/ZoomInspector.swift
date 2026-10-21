@@ -25,6 +25,23 @@ struct ZoomInspector: View {
         if let first = zooms.first(where: { model.selectedZooms.contains($0.id) }) {
             SelectedZoomPanel(model: model, zoom: first, count: model.selectedZooms.count)
         }
+        VStack(alignment: .leading, spacing: 10) {
+            SCSectionHeader("Framing")
+            Toggle("Keep zooms inside recording", isOn: Binding(
+                get: { project?.autoZoom.staysInRecording ?? true },
+                set: { on in
+                    model.update(on ? "Keep Zooms Inside Recording" : "Center Zooms on Focus") { p in
+                        p.autoZoom.staysInRecording = on
+                        for i in p.zooms.indices { p.zooms[i].staysInRecording = on }
+                    }
+                }
+            ))
+            .toggleStyle(.scSwitch)
+            Text("Turn off to center zooms on the cursor even near the edge, showing the background around the recording.")
+                .font(Typo.label).foregroundStyle(Palette.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+
         VStack(alignment: .leading, spacing: 14) {
             SCSectionHeader("Auto zoom") {
                 SCBadge(text: "\(zooms.filter { $0.origin == .auto }.count) auto · \(zooms.filter { $0.origin == .manual }.count) manual")
@@ -220,6 +237,12 @@ private struct SelectedZoomPanel: View {
                      format: { String(format: "%.2f s", $0) })
             SCSlider(title: "Zoom out", value: value(\.transitionOut, "Change Zoom Out"), in: 0...2, defaultValue: 0.8,
                      format: { String(format: "%.2f s", $0) })
+            Toggle("Keep inside recording", isOn: Binding(
+                get: { zoom.staysInRecording },
+                set: { on in model.updateSelectedZooms(on ? "Keep Zoom Inside Recording" : "Center Zoom on Focus") { $0.staysInRecording = on } }
+            ))
+            .toggleStyle(.scSwitch)
+            .help("Off: the zoom centers on its focus and can show the background around the recording.")
             Button(count == 1 ? "Delete Zoom" : "Delete \(count) Zooms", systemImage: "trash") { model.deleteSelection() }
                 .buttonStyle(.sc(.destructive, size: .small))
         }

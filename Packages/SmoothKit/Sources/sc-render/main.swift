@@ -81,7 +81,8 @@ if let z = value("--zoom").flatMap(Double.init) {
         ? .followCursor(deadZone: 0)
         : .fixed({ let f = value("--focus").map(numbers) ?? [0.5, 0.5]; return UnitPoint2D(x: f[0], y: f[1]) }())
     project.zooms = [ZoomSegment(range: TimeRange(start: 0, end: project.recording.duration), scale: z,
-                                 focus: focus, transitionIn: 0, transitionOut: 0)]
+                                 focus: focus, transitionIn: 0, transitionOut: 0,
+                                 staysInRecording: !args.contains("--center-zoom"))]
 }
 if let c = value("--cursor-scale").flatMap(Double.init) { project.cursor.scale = c }
 if let e = value("--click").flatMap(CursorSettings.ClickEffect.init(rawValue:)) { project.cursor.clickEffect = e }

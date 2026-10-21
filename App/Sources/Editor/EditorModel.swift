@@ -267,13 +267,15 @@ final class EditorModel {
     var playheadTime: Seconds { playback?.time ?? 0 }
 
     func addZoomAtPlayhead() {
-        guard let project, let zoom = ZoomEdits.insertion(at: playheadTime, in: project.zooms, duration: project.recording.duration) else { return }
+        guard let project, let zoom = ZoomEdits.insertion(at: playheadTime, in: project.zooms, duration: project.recording.duration,
+                                                                 staysInRecording: project.autoZoom.staysInRecording) else { return }
         update("Add Zoom") { $0.zooms.append(zoom) }
         select(zoom: zoom.id)
     }
 
     func addZoom(at time: Seconds) {
-        guard let project, let zoom = ZoomEdits.insertion(at: time, in: project.zooms, duration: project.recording.duration) else { return }
+        guard let project, let zoom = ZoomEdits.insertion(at: time, in: project.zooms, duration: project.recording.duration,
+                                                                 staysInRecording: project.autoZoom.staysInRecording) else { return }
         update("Add Zoom") { $0.zooms.append(zoom) }
         select(zoom: zoom.id)
     }

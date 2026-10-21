@@ -136,7 +136,7 @@ private struct Builder {
         let path = focus[i]
         let index = Int(((t - zooms[i].range.start) * CameraTrack.rate).rounded())
         let f = path[min(max(index, 0), path.count - 1)]
-        return ZoomCamera.targetRect(scale: zooms[i].scale, focus: f, canvas: canvas, screen: screen)
+        return ZoomCamera.targetRect(scale: zooms[i].scale, focus: f, canvas: canvas, screen: screen, staysInRecording: zooms[i].staysInRecording)
     }
 
     /// Long pans pull back a little mid-way so the viewer keeps their bearings.
@@ -166,7 +166,7 @@ private struct Builder {
         let free = CGSize(width: view.width * (0.5 - margin), height: view.height * (0.5 - margin))
 
         func clamp(_ c: CGPoint) -> CGPoint {
-            let r = ZoomCamera.targetRect(scale: zoom.scale, focus: c, canvas: canvas, screen: screen)
+            let r = ZoomCamera.targetRect(scale: zoom.scale, focus: c, canvas: canvas, screen: screen, staysInRecording: zoom.staysInRecording)
             return CGPoint(x: r.midX, y: r.midY)
         }
         func cursorAt(_ t: Seconds) -> CGPoint? { cursor.displayedPosition(at: t).map(toCanvas) }

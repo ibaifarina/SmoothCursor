@@ -221,11 +221,13 @@ public enum ZoomCamera {
     }
 
     /// The visible canvas rect when fully zoomed: centered on `focus`, kept inside the recording
-    /// when it fits (so no background shows), otherwise inside the canvas.
-    public static func targetRect(scale: Double, focus: CGPoint, canvas: CGSize, screen: CGRect) -> CGRect {
+    /// when it fits (so no background shows), otherwise inside the canvas. With `staysInRecording`
+    /// off it only stays inside the canvas, so the focus can be centered over the padding.
+    public static func targetRect(scale: Double, focus: CGPoint, canvas: CGSize, screen: CGRect, staysInRecording: Bool = true) -> CGRect {
         let size = CGSize(width: canvas.width / scale, height: canvas.height / scale)
         func clampAxis(_ center: Double, _ length: Double, screenMin: Double, screenMax: Double, canvasLength: Double) -> Double {
             let origin = center - length / 2
+            if !staysInRecording { return min(max(origin, 0), max(canvasLength - length, 0)) }
             if length <= screenMax - screenMin {
                 return min(max(origin, screenMin), screenMax - length)
             }

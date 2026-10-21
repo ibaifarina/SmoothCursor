@@ -23,6 +23,9 @@ public struct ZoomSegment: Codable, Hashable, Identifiable, Sendable {
     public var transitionOut: Seconds
     public var followSpring: SpringParams
     public var origin: Origin
+    /// Keep the view on the recording when it fits (no background). Off: center on the focus,
+    /// showing the padding around the recording, but never past the canvas edge.
+    public var staysInRecording: Bool
 
     public init(
         range: TimeRange,
@@ -32,11 +35,12 @@ public struct ZoomSegment: Codable, Hashable, Identifiable, Sendable {
         transitionIn: Seconds = 0.6,
         transitionOut: Seconds = 0.6,
         followSpring: SpringParams = .smooth,
-        origin: Origin = .manual
+        origin: Origin = .manual,
+        staysInRecording: Bool = true
     ) {
         self.range = range; self.scale = scale; self.focus = focus; self.easing = easing
         self.transitionIn = transitionIn; self.transitionOut = transitionOut
-        self.followSpring = followSpring; self.origin = origin
+        self.followSpring = followSpring; self.origin = origin; self.staysInRecording = staysInRecording
     }
 }
 
@@ -48,5 +52,7 @@ public struct AutoZoomSettings: Codable, Hashable, Sendable {
     public var sensitivity = 0.5
     public var minSegmentDuration: Seconds = 1.5
     public var mergeGap: Seconds = 1.0
+    /// Default for new zooms (automatic and manual); see `ZoomSegment.staysInRecording`.
+    public var staysInRecording = true
     public init() {}
 }

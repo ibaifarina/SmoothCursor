@@ -68,6 +68,35 @@ import Testing
         #expect(abs(visible.minY - l.screenRect.minY) < 1e-6)
     }
 
+    @Test func zoomCanCenterOverPadding() {
+        var p = project()
+        p.canvas.padding = 0.3
+        var zoom = ZoomSegment(range: TimeRange(start: 0, end: 4), scale: 2, focus: .fixed(UnitPoint2D(x: 1, y: 0)))
+        zoom.staysInRecording = false
+        p.zooms = [zoom]
+        let size = CGSize(width: 1920, height: 1080)
+        let l = FrameLayout.make(project: p, time: 2, outputSize: size, camera: CameraTrack(project: p, cursor: nil))
+        let visible = l.visibleCanvasRect
+        // Wide padding: the recording's top-right corner sits in the middle of the view.
+        #expect(visible.minX >= -1e-6 && visible.maxX <= size.width + 1e-6)
+        #expect(abs(visible.midX - l.screenRect.maxX) < 1)
+        #expect(abs(visible.midY - l.screenRect.minY) < 1)
+    }
+
+    @Test func centeredZoomNeverLeavesCanvas() {
+        var p = project()
+        p.canvas.padding = 0.05
+        var zoom = ZoomSegment(range: TimeRange(start: 0, end: 4), scale: 2, focus: .fixed(UnitPoint2D(x: 0, y: 0)))
+        zoom.staysInRecording = false
+        p.zooms = [zoom]
+        let size = CGSize(width: 1920, height: 1080)
+        let l = FrameLayout.make(project: p, time: 2, outputSize: size, camera: CameraTrack(project: p, cursor: nil))
+        let visible = l.visibleCanvasRect
+        #expect(abs(visible.minX) < 1e-6 && abs(visible.minY) < 1e-6)
+        // Further toward the corner than when kept inside the recording.
+        #expect(visible.minX < l.screenRect.minX)
+    }
+
     @Test func zoomEasesInAndOut() {
         var p = project()
         p.zooms = [ZoomSegment(range: TimeRange(start: 1, end: 3), scale: 2, transitionIn: 0.5, transitionOut: 0.5)]

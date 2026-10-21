@@ -88,8 +88,11 @@ public enum TimelineEdits {
     }
 
     /// A new zoom at `time`, sized to fit the free space around it. Nil if there's no room.
-    public static func insertion(at time: Seconds, in zooms: [ZoomSegment], duration: Seconds, length: Seconds = 2.5) -> ZoomSegment? {
-        freeRange(at: time, in: zooms, duration: duration, length: length).map { ZoomSegment(range: $0, origin: .manual) }
+    public static func insertion(
+        at time: Seconds, in zooms: [ZoomSegment], duration: Seconds, length: Seconds = 2.5, staysInRecording: Bool = true
+    ) -> ZoomSegment? {
+        freeRange(at: time, in: zooms, duration: duration, length: length)
+            .map { ZoomSegment(range: $0, origin: .manual, staysInRecording: staysInRecording) }
     }
 }
 
