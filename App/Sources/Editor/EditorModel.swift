@@ -2,6 +2,7 @@ import AppKit
 import Observation
 import SCCore
 import SCProject
+import SCRender
 import SwiftUI
 
 enum InspectorTab: String, CaseIterable, Identifiable {
@@ -29,9 +30,11 @@ final class EditorModel {
     private(set) var project: Project?
     var loadError: String?
     var inspectorTab: InspectorTab = .background
-    var playhead: Seconds = 0
-    /// First frame, shown on the placeholder canvas until the Metal preview exists (step 3).
-    var posterFrame: CGImage?
+    private(set) var playback: PlaybackController?
+    var isCropping = false
+    var cropLock: CropLock = .free
+    /// True while a text field is being edited, so single-key shortcuts (Space, arrows) stay out of the way.
+    var isEditingText = false
 
     @ObservationIgnored weak var undoManager: UndoManager?
     /// Consecutive edits with the same name inside this window become one undo step (slider drags).
@@ -52,8 +55,17 @@ final class EditorModel {
     func load() async {
         do {
             let url = packageURL
-            project = try await Task.detached { try ProjectPackage.read(at: url) }.value
-            await loadPosterFrame()
+            let loaded = try await Task.detached { try ProjectPackage.read(at: url) }.value
+            project = loaded
+            playback = PlaybackController(
+                url: ProjectPackage.mediaURL(loaded.recording.videoFile, in: url),
+                duration: loaded.recording.duration, fps: loaded.recording.fps
+            )
+            #if DEBUG
+            if ProcessInfo.processInfo.environment["SC_AUTOPLAY"] != nil { playback?.play() }
+            if ProcessInfo.processInfo.environment["SC_CROP"] != nil { isCropping = true }
+            #endif
+            _ = await Thumbnailer.ensureThumbnail(for: url)
         } catch {
             loadError = error.localizedDescription
         }
@@ -92,6 +104,7 @@ final class EditorModel {
     }
 
     func close() async {
+        playback?.invalidate()
         await autosaver.flush()
         if let terminationObserver { NotificationCenter.default.removeObserver(terminationObserver) }
     }
@@ -106,11 +119,5 @@ final class EditorModel {
             model.apply(previous, actionName: actionName, undoTo: model.project)
         }
         undoManager.setActionName(actionName)
-    }
-
-    private func loadPosterFrame() async {
-        guard let project else { return }
-        posterFrame = await Thumbnailer.frame(of: ProjectPackage.mediaURL(project.recording.videoFile, in: packageURL), at: 0)
-        _ = await Thumbnailer.ensureThumbnail(for: packageURL)
     }
 }

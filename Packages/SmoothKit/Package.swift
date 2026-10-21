@@ -20,6 +20,8 @@ let package = Package(
         .target(name: "SCExport", dependencies: ["SCCore", "SCRender"]),
         // Developer tool: `swift run sc-record --seconds 3` records the main display into a temp package.
         .executableTarget(name: "sc-record", dependencies: ["SCCore", "SCCapture"]),
+        // Developer tool: `swift run sc-render <package> --time 2 --out frame.png` renders one frame offline.
+        .executableTarget(name: "sc-render", dependencies: ["SCCore", "SCProject", "SCRender"]),
         .testTarget(name: "SCCoreTests", dependencies: ["SCCore", "SCProject", "SCCapture"]),
     ]
 )

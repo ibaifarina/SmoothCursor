@@ -1,10 +1,12 @@
 import SCCore
+import SCRender
 import SwiftUI
 
-/// Read-only track view with a draggable playhead. Replaced by the real timeline in step 5b.
+/// Read-only track view with a scrubbable playhead. Replaced by the real timeline in step 5b.
 struct TimelinePlaceholder: View {
     let project: Project
-    @Binding var playhead: Seconds
+    let playback: PlaybackController
+    @State private var scrubbing = false
 
     private let headerWidth: CGFloat = 116
     private let trackHeight: CGFloat = 32
@@ -43,13 +45,21 @@ struct TimelinePlaceholder: View {
             }
             .overlay(alignment: .topLeading) {
                 Playhead(height: geo.size.height - 8)
-                    .offset(x: headerWidth + playhead * scale - 6)
+                    .offset(x: headerWidth + playback.time * scale - 6)
                     .allowsHitTesting(false)
             }
             .contentShape(.rect)
-            .gesture(DragGesture(minimumDistance: 0).onChanged { value in
-                playhead = min(max(0, (value.location.x - headerWidth) / scale), duration)
-            })
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        if !scrubbing { scrubbing = true; playback.beginScrub() }
+                        playback.seek(to: (value.location.x - headerWidth) / scale)
+                    }
+                    .onEnded { _ in
+                        scrubbing = false
+                        playback.endScrub()
+                    }
+            )
         }
         .padding(.top, 6)
     }
