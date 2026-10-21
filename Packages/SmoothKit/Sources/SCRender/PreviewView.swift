@@ -141,9 +141,13 @@ public final class PreviewView: NSView {
         let layout = cropEditing
             ? FrameLayout.cropEditing(project: project, outputSize: size)
             : FrameLayout.make(project: project, time: time, outputSize: size, cursor: cursorTrack, camera: cameraTrack)
+        let motion = cropEditing ? nil : FrameLayout.motionBlur(
+            project: project, time: time, outputSize: size, cursor: cursorTrack, camera: cameraTrack,
+            frameDuration: 1 / Double(max(project.export.fps, 1)), quality: .preview
+        )
         compositor.encode(
             layout: layout, source: currentFrame?.texture, sourceChanged: frameChanged,
-            into: drawable.texture, commandBuffer: commandBuffer
+            into: drawable.texture, commandBuffer: commandBuffer, motion: motion
         )
         frameChanged = false
         let frame = currentFrame

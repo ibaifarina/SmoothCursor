@@ -46,6 +46,21 @@ struct ZoomInspector: View {
         }
         .disabled(!hasTelemetry)
 
+        VStack(alignment: .leading, spacing: 14) {
+            SCSectionHeader("Motion blur")
+            Toggle("Motion blur", isOn: model.binding(\.motionBlur.enabled, "Toggle Motion Blur", coalesce: false))
+                .toggleStyle(.scSwitch)
+            Group {
+                SCSlider(title: "Shutter", value: model.binding(\.motionBlur.amount, "Change Motion Blur"), in: 0.05...1,
+                         defaultValue: 0.5, format: { "\(Int($0 * 360))°" })
+                Toggle("Blur camera moves", isOn: model.binding(\.motionBlur.applyToCamera, "Toggle Camera Blur", coalesce: false))
+                    .toggleStyle(.scSwitch)
+                Toggle("Blur cursor", isOn: model.binding(\.motionBlur.applyToCursor, "Toggle Cursor Blur", coalesce: false))
+                    .toggleStyle(.scSwitch)
+            }
+            .disabled(!(project?.motionBlur.enabled ?? false))
+        }
+
         VStack(alignment: .leading, spacing: 8) {
             SCSectionHeader("Zooms")
             if zooms.isEmpty {

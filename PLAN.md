@@ -89,6 +89,8 @@ Tip: steps 6 and 2 can run in parallel with others once step 3 exists.
 
 - [x] **Step 6 — Backgrounds.** Color / Gradient / Image modes. Custom color picker (saturation-brightness square, hue, hex, eyedropper). Gradient editor: linear / radial / angular / mesh, draggable stops (click bar to add), reverse, angle, center; mesh 3×3 colors with Shuffle / Vivid. Images: macOS wallpapers, any image file, blurred frame of the recording; copied into the package as ≤4K JPEG; blur slider. Grain for all modes; shadow softness.
 
+- [x] **Step 7 — Motion blur.** Camera: post pass averaging each pixel along its exact screen path over the shutter (zoom+pan is analytic), adaptive taps, jittered. Cursor: sampled at sub-frame instants (each with its own camera), accumulated in a float layer; sample count adapts to travel; teleports stay sharp. Shutter angle setting (default 180°), camera/cursor toggles, preview and export quality tiers; static frames skip the extra passes.
+
 ## Build
 
 ```bash

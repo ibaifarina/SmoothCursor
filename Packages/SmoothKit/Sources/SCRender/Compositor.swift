@@ -18,6 +18,12 @@ public final class Compositor {
     private let screenPipeline: MTLRenderPipelineState
     private let cursorPipeline: MTLRenderPipelineState
     private let effectPipeline: MTLRenderPipelineState
+    private let blurPipeline: MTLRenderPipelineState
+    private let copyPipeline: MTLRenderPipelineState
+    private let layerPipeline: MTLRenderPipelineState
+    private let cursorAccumulatePipeline: MTLRenderPipelineState
+    private var sceneTexture: MTLTexture?
+    private var cursorLayer: MTLTexture?
     private var cursorTextures: [URL: MTLTexture] = [:]
     private let sampler: MTLSamplerState
     private let placeholder: MTLTexture
@@ -30,14 +36,23 @@ public final class Compositor {
         self.pixelFormat = pixelFormat
         let device = context.device
 
-        func pipeline(_ fragment: String, blended: Bool, vertex: String = "quad_vertex") throws -> MTLRenderPipelineState {
+        func pipeline(
+            _ fragment: String, blended: Bool, vertex: String = "quad_vertex",
+            format: MTLPixelFormat = pixelFormat, additive: Bool = false
+        ) throws -> MTLRenderPipelineState {
             let d = MTLRenderPipelineDescriptor()
             d.label = fragment
             d.vertexFunction = context.library.makeFunction(name: vertex)
             d.fragmentFunction = context.library.makeFunction(name: fragment)
             let attachment = d.colorAttachments[0]!
-            attachment.pixelFormat = pixelFormat
-            if blended {
+            attachment.pixelFormat = format
+            if additive {
+                attachment.isBlendingEnabled = true
+                attachment.sourceRGBBlendFactor = .one
+                attachment.destinationRGBBlendFactor = .one
+                attachment.sourceAlphaBlendFactor = .one
+                attachment.destinationAlphaBlendFactor = .one
+            } else if blended {
                 // Premultiplied alpha.
                 attachment.isBlendingEnabled = true
                 attachment.sourceRGBBlendFactor = .one
@@ -52,6 +67,10 @@ public final class Compositor {
         screenPipeline = try pipeline("screen_fragment", blended: true)
         cursorPipeline = try pipeline("cursor_fragment", blended: true, vertex: "corners_vertex")
         effectPipeline = try pipeline("effect_fragment", blended: true)
+        blurPipeline = try pipeline("motion_blur_fragment", blended: false, vertex: "fullscreen_vertex")
+        copyPipeline = try pipeline("layer_fragment", blended: false, vertex: "fullscreen_vertex")
+        layerPipeline = try pipeline("layer_fragment", blended: true, vertex: "fullscreen_vertex")
+        cursorAccumulatePipeline = try pipeline("cursor_fragment", blended: false, vertex: "corners_vertex", format: .rgba16Float, additive: true)
 
         let s = MTLSamplerDescriptor()
         s.minFilter = .linear
@@ -72,7 +91,96 @@ public final class Compositor {
     /// video frame, so cached mip levels are rebuilt.
     public func encode(
         layout: FrameLayout, source: MTLTexture?, sourceChanged: Bool,
-        into target: MTLTexture, commandBuffer: MTLCommandBuffer
+        into target: MTLTexture, commandBuffer: MTLCommandBuffer, motion: MotionBlurFrame? = nil
+    ) {
+        guard let motion, let scene = offscreen(&sceneTexture, like: target, format: target.pixelFormat) else {
+            encodeScene(layout: layout, source: source, sourceChanged: sourceChanged, into: target, commandBuffer: commandBuffer, drawCursor: true)
+            return
+        }
+        let blurCursor = !motion.cursors.isEmpty
+        encodeScene(layout: layout, source: source, sourceChanged: sourceChanged, into: scene, commandBuffer: commandBuffer, drawCursor: !blurCursor)
+        var layer: MTLTexture?
+        if blurCursor, let cursorTexture = offscreen(&cursorLayer, like: target, format: .rgba16Float) {
+            accumulateCursor(motion.cursors, layout: layout, into: cursorTexture, target: target, commandBuffer: commandBuffer)
+            layer = cursorTexture
+        }
+
+        let pass = MTLRenderPassDescriptor()
+        pass.colorAttachments[0].texture = target
+        pass.colorAttachments[0].loadAction = .dontCare
+        pass.colorAttachments[0].storeAction = .store
+        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else { return }
+        encoder.label = "Motion blur"
+        encoder.setFragmentSamplerState(sampler, index: 0)
+        encoder.setFragmentTexture(scene, index: 0)
+        if motion.hasCameraMotion {
+            let s = Double(target.width) / max(layout.outputSize.width, 1)
+            func cam(_ c: FrameLayout.Camera) -> SIMD4<Float> { SIMD4(Float(c.viewOrigin.x), Float(c.viewOrigin.y), Float(c.scale * s), 0) }
+            var uniforms: [SIMD4<Float>] = [
+                cam(layout.camera), cam(motion.cameraFrom), cam(motion.cameraTo),
+                SIMD4(Float(motion.taps), 0, Float(target.width), Float(target.height)),
+            ]
+            encoder.setRenderPipelineState(blurPipeline)
+            encoder.setFragmentBytes(&uniforms, length: MemoryLayout<SIMD4<Float>>.stride * uniforms.count, index: 0)
+        } else {
+            encoder.setRenderPipelineState(copyPipeline)
+        }
+        encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+        if let layer {
+            encoder.setRenderPipelineState(layerPipeline)
+            encoder.setFragmentTexture(layer, index: 0)
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+        }
+        encoder.endEncoding()
+    }
+
+    /// Averages the cursor over the shutter: each sample adds 1/N into a float layer.
+    private func accumulateCursor(_ cursors: [FrameLayout.Cursor], layout: FrameLayout, into layer: MTLTexture, target: MTLTexture, commandBuffer: MTLCommandBuffer) {
+        guard let texture = cursorTexture(cursors[0].sprite.imageURL) else { return }
+        let pass = MTLRenderPassDescriptor()
+        pass.colorAttachments[0].texture = layer
+        pass.colorAttachments[0].loadAction = .clear
+        pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+        pass.colorAttachments[0].storeAction = .store
+        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else { return }
+        encoder.label = "Cursor blur"
+        var frame = frameUniforms(layout: layout, target: target)
+        encoder.setVertexBytes(&frame, length: MemoryLayout<SIMD4<Float>>.stride * frame.count, index: 0)
+        encoder.setRenderPipelineState(cursorAccumulatePipeline)
+        encoder.setFragmentSamplerState(sampler, index: 0)
+        let weight = 1 / Float(cursors.count)
+        for cursor in cursors {
+            encoder.setFragmentTexture(cursorTexture(cursor.sprite.imageURL) ?? texture, index: 0)
+            var corners = Self.cornerVectors(cursor.corners)
+            encoder.setVertexBytes(&corners, length: MemoryLayout<SIMD4<Float>>.stride * 2, index: 1)
+            var params = SIMD4<Float>(Float(cursor.opacity) * weight, 0, 0, 0)
+            encoder.setFragmentBytes(&params, length: MemoryLayout<SIMD4<Float>>.stride, index: 1)
+            encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+        }
+        encoder.endEncoding()
+    }
+
+    private func frameUniforms(layout: FrameLayout, target: MTLTexture) -> [SIMD4<Float>] {
+        let canvasSize = layout.outputSize
+        let targetScale = Double(target.width) / max(canvasSize.width, 1)
+        return [
+            SIMD4(Float(layout.camera.viewOrigin.x), Float(layout.camera.viewOrigin.y), Float(layout.camera.scale * targetScale), 0),
+            SIMD4(Float(target.width), Float(target.height), Float(canvasSize.width), Float(canvasSize.height)),
+        ]
+    }
+
+    private func offscreen(_ cache: inout MTLTexture?, like target: MTLTexture, format: MTLPixelFormat) -> MTLTexture? {
+        if let t = cache, t.width == target.width, t.height == target.height, t.pixelFormat == format { return t }
+        let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: format, width: target.width, height: target.height, mipmapped: false)
+        d.usage = [.renderTarget, .shaderRead]
+        d.storageMode = .private
+        cache = context.device.makeTexture(descriptor: d)
+        return cache
+    }
+
+    private func encodeScene(
+        layout: FrameLayout, source: MTLTexture?, sourceChanged: Bool,
+        into target: MTLTexture, commandBuffer: MTLCommandBuffer, drawCursor shouldDrawCursor: Bool
     ) {
         let filter = filterMode(layout: layout, source: source)
         var screenTexture = source ?? placeholder
@@ -138,7 +246,7 @@ public final class Compositor {
         encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
 
         drawClickEffects(layout.clickEffects, encoder: encoder)
-        if let cursor = layout.cursor { drawCursor(cursor, encoder: encoder) }
+        if shouldDrawCursor, let cursor = layout.cursor { drawCursor(cursor, encoder: encoder) }
 
         encoder.endEncoding()
     }

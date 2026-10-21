@@ -43,6 +43,7 @@ if let image = value("--image") {
     project.canvas.background = .image(ImageBackground(source: .projectFile(relativePath: path), blur: Double(value("--blur") ?? "0") ?? 0))
 }
 if let g = value("--grain").flatMap(Double.init) { project.canvas.backgroundNoise = g }
+if let m = value("--motion").flatMap(Double.init) { project.motionBlur.enabled = m > 0; project.motionBlur.amount = m }
 if let p = value("--padding").flatMap(Double.init) { project.canvas.padding = p }
 if let r = value("--radius").flatMap(Double.init) { project.canvas.cornerRadius = r }
 if let c = value("--crop").map(numbers), c.count == 4 { project.canvas.crop = UnitRect(x: c[0], y: c[1], width: c[2], height: c[3]) }
@@ -79,12 +80,13 @@ if let file = project.recording.telemetryFile,
     }
 }
 
+let cameraTrack = CameraTrack(project: project, cursor: track)
 let height = Double(value("--height") ?? "1080") ?? 1080
 let aspect = args.contains("--crop-mode") ? project.recording.pixelSize.aspect : FrameLayout.outputAspect(for: project)
 let size = CGSize(width: (height * aspect).rounded(), height: height)
 let layout = args.contains("--crop-mode")
     ? FrameLayout.cropEditing(project: project, outputSize: size)
-    : FrameLayout.make(project: project, time: time, outputSize: size, cursor: track, camera: CameraTrack(project: project, cursor: track))
+    : FrameLayout.make(project: project, time: time, outputSize: size, cursor: track, camera: cameraTrack)
 
 guard let context = MetalContext.shared else { print("no Metal"); exit(1) }
 let renderer = try OfflineRenderer(context: context)
@@ -98,7 +100,12 @@ renderer.compositor.imageResolver = { source in
 }
 let source = try await VideoFrameReader.pixelBuffer(of: ProjectPackage.mediaURL(project.recording.videoFile, in: package), at: time)
 let start = Date()
-let image = try renderer.render(layout: layout, source: source)
+let motion = args.contains("--crop-mode") ? nil : FrameLayout.motionBlur(
+    project: project, time: time, outputSize: size, cursor: track, camera: cameraTrack,
+    frameDuration: 1 / Double(project.export.fps), quality: .export
+)
+if let motion { print("motion blur: camera \(motion.hasCameraMotion), cursor samples \(motion.cursors.count)") }
+let image = try renderer.render(layout: layout, source: source, motion: motion)
 let elapsed = Date().timeIntervalSince(start)
 
 let out = URL(fileURLWithPath: value("--out") ?? "frame.png")

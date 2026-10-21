@@ -270,4 +270,57 @@ fragment float4 effect_fragment(VOut in [[stage_in]],
     float a = coverage * e.color.a;
     return float4(e.color.rgb * a, a);
 }
+// MARK: - Motion blur
+
+struct FullscreenOut {
+    float4 position [[position]];
+    float2 uv;
+};
+
+vertex FullscreenOut fullscreen_vertex(uint vid [[vertex_id]]) {
+    float2 uv = float2(float((vid << 1) & 2), float(vid & 2));
+    FullscreenOut out;
+    out.position = float4(uv * float2(2.0, -2.0) + float2(-1.0, 1.0), 0.0, 1.0);
+    out.uv = uv;
+    return out;
+}
+
+struct BlurUniforms {
+    float4 now;    // xy view origin (canvas), z px per canvas unit
+    float4 from;   // camera at shutter open
+    float4 to;     // camera at shutter close
+    float4 params; // x taps, zw target size
+};
+
+// Averages the scene along each pixel's path over the shutter. The camera is a pure zoom+pan, so
+// where canvas content seen at pixel p at time τ sits in the current frame is exact:
+// q(τ) = (origin_τ + p / scale_τ − origin_now) · scale_now.
+fragment float4 motion_blur_fragment(FullscreenOut in [[stage_in]],
+                                     constant BlurUniforms &u [[buffer(0)]],
+                                     texture2d<float> scene [[texture(0)]],
+                                     sampler smp [[sampler(0)]]) {
+    float2 size = u.params.zw;
+    float2 p = in.uv * size;
+    float2 qa = (u.from.xy + p / u.from.z - u.now.xy) * u.now.z;
+    float2 qb = (u.to.xy + p / u.to.z - u.now.xy) * u.now.z;
+    float dist = distance(qa, qb);
+    if (dist < 0.75) return scene.sample(smp, in.uv);
+    // Only as many samples as this pixel's motion needs (~1.5 px apart).
+    int taps = clamp(int(dist / 1.5), 3, int(u.params.x));
+    float4 sum = 0.0;
+    // Per-pixel jitter turns residual stepping into fine noise.
+    float jitter = fract(sin(dot(p, float2(12.9898, 78.233))) * 43758.5453) - 0.5;
+    for (int i = 0; i < taps; i++) {
+        float t = (float(i) + 0.5 + jitter) / float(taps);
+        sum += scene.sample(smp, mix(qa, qb, t) / size);
+    }
+    return sum / float(taps);
+}
+
+// Premultiplied layer (e.g. the accumulated cursor) composited over the target.
+fragment float4 layer_fragment(FullscreenOut in [[stage_in]],
+                               texture2d<float> layer [[texture(0)]],
+                               sampler smp [[sampler(0)]]) {
+    return layer.sample(smp, in.uv);
+}
 """#
