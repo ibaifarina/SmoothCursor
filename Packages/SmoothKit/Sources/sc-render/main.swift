@@ -67,6 +67,11 @@ if let file = project.recording.telemetryFile,
     track = CursorTrack(telemetry: telemetry, settings: project.cursor, sprites: sprites, duration: project.recording.duration)
     let clickTimes = telemetry.events.filter { $0.kind == .mouseDown }.map { String(format: "%.3f", $0.time) }
     print("telemetry: \(telemetry.events.count) events, clicks at \(clickTimes)")
+    if args.contains("--auto") {
+        project.zooms = []
+        AutoZoom.regenerate(&project, telemetry: telemetry)
+        for z in project.zooms { print(String(format: "auto zoom %.2f–%.2f s at %.2f×", z.range.start, z.range.end, z.scale)) }
+    }
 }
 
 let height = Double(value("--height") ?? "1080") ?? 1080
@@ -74,7 +79,7 @@ let aspect = args.contains("--crop-mode") ? project.recording.pixelSize.aspect :
 let size = CGSize(width: (height * aspect).rounded(), height: height)
 let layout = args.contains("--crop-mode")
     ? FrameLayout.cropEditing(project: project, outputSize: size)
-    : FrameLayout.make(project: project, time: time, outputSize: size, cursor: track)
+    : FrameLayout.make(project: project, time: time, outputSize: size, cursor: track, camera: CameraTrack(project: project, cursor: track))
 
 guard let context = MetalContext.shared else { print("no Metal"); exit(1) }
 let renderer = try OfflineRenderer(context: context)

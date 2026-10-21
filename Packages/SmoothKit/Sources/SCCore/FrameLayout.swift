@@ -74,7 +74,21 @@ public struct FrameLayout: Equatable, Sendable {
         min(size.width, size.height) / 1080
     }
 
-    public static func make(project: Project, time: Seconds, outputSize: CGSize, cursor track: CursorTrack? = nil) -> FrameLayout {
+    /// Full frame: layout, camera (from `camera`, identity if nil) and cursor (if `cursor` is given).
+    public static func make(
+        project: Project, time: Seconds, outputSize: CGSize,
+        cursor track: CursorTrack? = nil, camera: CameraTrack? = nil
+    ) -> FrameLayout {
+        var layout = base(project: project, outputSize: outputSize)
+        if let camera { layout.camera = camera.camera(at: time, outputSize: outputSize) }
+        if let track {
+            layout.placeCursor(track: track, time: time, toCanvas: layout.mapping(targetSize: track.targetSize), settings: project.cursor)
+        }
+        return layout
+    }
+
+    /// Static layout (no camera motion, no cursor).
+    public static func base(project: Project, outputSize: CGSize) -> FrameLayout {
         let canvas = project.canvas
         let ref = referenceScale(for: outputSize)
         let inset = min(outputSize.width, outputSize.height) * canvas.padding
@@ -85,18 +99,11 @@ public struct FrameLayout: Equatable, Sendable {
             ? Shadow(sigma: max(canvas.shadow.radius * ref / 2, 0.5), offsetY: canvas.shadow.offsetY * ref, opacity: canvas.shadow.opacity)
             : nil
 
-        var layout = FrameLayout(
+        return FrameLayout(
             outputSize: outputSize, screenRect: screen, cornerRadius: radius, shadow: shadow,
             sourceCrop: canvas.crop, camera: .identity, background: canvas.background,
             backgroundNoise: canvas.backgroundNoise
         )
-        let toCanvas = track.map { layout.mapping(targetSize: $0.targetSize) }
-        let cameraFocus: CGPoint? = if let toCanvas, let p = track?.cameraPosition(at: time) { toCanvas(p) } else { nil }
-        layout.camera = ZoomCamera.camera(for: project, time: time, layout: layout, cursor: cameraFocus)
-        if let track, let toCanvas {
-            layout.placeCursor(track: track, time: time, toCanvas: toCanvas, settings: project.cursor)
-        }
-        return layout
     }
 
     /// Target points → canvas, through the crop.
@@ -179,29 +186,6 @@ public enum ZoomCamera {
         return min(zoom.easing.value(inProgress), zoom.easing.value(outProgress))
     }
 
-    static func camera(for project: Project, time: Seconds, layout: FrameLayout, cursor: CGPoint?) -> FrameLayout.Camera {
-        // Strongest active zoom wins; smooth zoom-to-zoom handoffs come with the zoom engine (step 5).
-        guard let (zoom, amount) = project.zooms
-            .map({ ($0, amount(of: $0, at: time)) })
-            .max(by: { $0.1 < $1.1 }),
-            amount > 0.0001, zoom.scale > 1.0001
-        else { return .identity }
-
-        let screen = layout.screenRect
-        let focus: CGPoint = switch zoom.focus {
-        case let .fixed(point):
-            // Focus is in source units; map through the crop onto the screen rect.
-            CGPoint(
-                x: screen.minX + (point.x - layout.sourceCrop.x) / layout.sourceCrop.width * screen.width,
-                y: screen.minY + (point.y - layout.sourceCrop.y) / layout.sourceCrop.height * screen.height
-            )
-        case .followCursor:
-            cursor ?? CGPoint(x: screen.midX, y: screen.midY)
-        }
-        let target = targetRect(scale: zoom.scale, focus: focus, canvas: layout.outputSize, screen: screen)
-        return interpolate(to: target, canvas: layout.outputSize, amount: amount)
-    }
-
     /// The visible canvas rect when fully zoomed: centered on `focus`, kept inside the recording
     /// when it fits (so no background shows), otherwise inside the canvas.
     public static func targetRect(scale: Double, focus: CGPoint, canvas: CGSize, screen: CGRect) -> CGRect {
@@ -222,21 +206,25 @@ public enum ZoomCamera {
         )
     }
 
-    /// Zooms from the full canvas towards `target` about their common fixed point, with
-    /// geometric size interpolation so the zoom speed feels constant.
-    static func interpolate(to target: CGRect, canvas: CGSize, amount: Double) -> FrameLayout.Camera {
-        let w0 = canvas.width, w1 = target.width
-        let width = w0 * pow(w1 / w0, amount)
+    /// Moves from rect `a` to rect `b` (same aspect) about their common fixed point, with geometric
+    /// size interpolation so zoom speed feels constant. Pure pans (equal sizes) are linear.
+    public static func interpolate(from a: CGRect, to b: CGRect, amount t: Double) -> CGRect {
+        let w0 = a.width, w1 = b.width
+        guard w0 > 0, w1 > 0 else { return b }
+        let width = w0 * pow(w1 / w0, t)
         let ratio = width / w0
-        let origin: CGPoint
-        if abs(w0 - w1) < 1e-6 {
-            origin = CGPoint(x: target.minX * amount, y: target.minY * amount)
-        } else {
-            // Fixed point f satisfies f / w0 == (f - o1) / w1 (o0 is the canvas origin).
-            let k = 1 / w0 - 1 / w1
-            let f = CGPoint(x: (-target.minX / w1) / k, y: (-target.minY / w1) / k)
-            origin = CGPoint(x: f.x - f.x * ratio, y: f.y - f.y * ratio)
+        let aspect = a.height / a.width
+        if abs(w0 - w1) < 1e-6 * w0 {
+            return CGRect(x: a.minX + (b.minX - a.minX) * t, y: a.minY + (b.minY - a.minY) * t, width: width, height: width * aspect)
         }
-        return FrameLayout.Camera(viewOrigin: origin, scale: 1 / ratio)
+        // Fixed point f satisfies (f - a.origin) / w0 == (f - b.origin) / w1.
+        let fx = (b.minX * w0 - a.minX * w1) / (w0 - w1)
+        let fy = (b.minY * w0 - a.minY * w1) / (w0 - w1)
+        return CGRect(x: fx - (fx - a.minX) * ratio, y: fy - (fy - a.minY) * ratio, width: width, height: width * aspect)
+    }
+
+    /// Camera showing `rect` (canvas space) on an output of `outputSize`.
+    public static func camera(showing rect: CGRect, outputSize: CGSize) -> FrameLayout.Camera {
+        FrameLayout.Camera(viewOrigin: rect.origin, scale: outputSize.width / max(rect.width, 1e-9))
     }
 }

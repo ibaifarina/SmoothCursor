@@ -60,7 +60,7 @@ import Testing
         p.canvas.padding = 0.1
         p.zooms = [ZoomSegment(range: TimeRange(start: 0, end: 4), scale: 2, focus: .fixed(UnitPoint2D(x: 0, y: 0)))]
         let size = CGSize(width: 1920, height: 1080)
-        let l = FrameLayout.make(project: p, time: 2, outputSize: size)
+        let l = FrameLayout.make(project: p, time: 2, outputSize: size, camera: CameraTrack(project: p, cursor: nil))
         let visible = l.visibleCanvasRect
         #expect(abs(l.camera.scale - 2) < 1e-6)
         // Focus at the top-left corner clamps to the recording's corner: no background visible.
@@ -72,23 +72,27 @@ import Testing
         var p = project()
         p.zooms = [ZoomSegment(range: TimeRange(start: 1, end: 3), scale: 2, transitionIn: 0.5, transitionOut: 0.5)]
         let size = CGSize(width: 1920, height: 1080)
-        let scales = stride(from: 0.9, through: 3.1, by: 0.05).map { FrameLayout.make(project: p, time: $0, outputSize: size).camera.scale }
-        #expect(scales.first == 1)
-        #expect(scales.last == 1)
-        #expect(abs(scales.max()! - 2) < 1e-6)
+        let track = CameraTrack(project: p, cursor: nil)
+        let scales = stride(from: 0.9, through: 3.1, by: 0.05).map { FrameLayout.make(project: p, time: $0, outputSize: size, camera: track).camera.scale }
+        #expect(abs(scales.first! - 1) < 1e-9)
+        #expect(abs(scales.last! - 1) < 1e-9)
+        #expect(abs(scales.max()! - 2) < 1e-3)
         // Monotonic in, then out.
-        let peak = scales.firstIndex { abs($0 - 2) < 1e-6 }!
+        let peak = scales.firstIndex { abs($0 - 2) < 1e-3 }!
         #expect(zip(scales[..<peak], scales[1...peak]).allSatisfy { $0 <= $1 + 1e-9 })
     }
 
     @Test func interpolationKeepsFixedPoint() {
-        let canvas = CGSize(width: 1000, height: 500)
+        let full = CGRect(x: 0, y: 0, width: 1000, height: 500)
         let target = CGRect(x: 600, y: 250, width: 250, height: 125)
-        let full = ZoomCamera.interpolate(to: target, canvas: canvas, amount: 1)
-        #expect(abs(full.scale - 4) < 1e-9)
-        #expect(abs(full.viewOrigin.x - 600) < 1e-6 && abs(full.viewOrigin.y - 250) < 1e-6)
-        let none = ZoomCamera.interpolate(to: target, canvas: canvas, amount: 0)
-        #expect(none.scale == 1 && abs(none.viewOrigin.x) < 1e-9)
+        let end = ZoomCamera.interpolate(from: full, to: target, amount: 1)
+        #expect(abs(end.width - 250) < 1e-9 && abs(end.minX - 600) < 1e-6 && abs(end.minY - 250) < 1e-6)
+        let start = ZoomCamera.interpolate(from: full, to: target, amount: 0)
+        #expect(abs(start.width - 1000) < 1e-9 && abs(start.minX) < 1e-9)
+        // The fixed point maps to the same relative position at every step.
+        let mid = ZoomCamera.interpolate(from: full, to: target, amount: 0.5)
+        let fx = (target.minX * 1000 - 0 * 250) / (1000 - 250)
+        #expect(abs((fx - mid.minX) / mid.width - fx / 1000) < 1e-9)
     }
 }
 

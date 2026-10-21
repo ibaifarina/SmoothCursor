@@ -39,7 +39,6 @@ public struct CursorTrack: Sendable {
     static let rate = 240.0
     private let raw: [(time: Seconds, position: CGPoint, sprite: Int)]
     private let smoothed: [SIMD4<Double>] // x, y, vx, vy at `rate`
-    private let camera: [SIMD2<Double>]   // slower path for the zoom camera
     private let sprites: [Sprite]
     private let presses: [TimeRange]
     private let idleGaps: [TimeRange]
@@ -82,7 +81,6 @@ public struct CursorTrack: Sendable {
         smoothed = Self.anchorToClicks(
             Self.simulate(raw: self.raw, length: length, settings: settings), raw: self.raw, clicks: clicks
         )
-        camera = Self.simulateCamera(smoothed: smoothed)
         idleGaps = Self.idleGaps(raw: self.raw, clicks: clicks, length: length, delay: settings.idleDelay)
     }
 
@@ -102,17 +100,6 @@ public struct CursorTrack: Sendable {
             pressScale: settings.clickEffect == .press ? 1 - 0.18 * pressAmount(at: time) : 1 - 0.06 * pressAmount(at: time),
             rotation: rotation
         )
-    }
-
-    /// Heavily smoothed position for camera follow, in target points.
-    public func cameraPosition(at time: Seconds) -> CGPoint? {
-        guard !camera.isEmpty else { return nil }
-        let i = time * Self.rate
-        let a = Int(min(max(floor(i), 0), Double(camera.count - 1)))
-        let b = min(a + 1, camera.count - 1)
-        let f = min(max(i - Double(a), 0), 1)
-        let p = camera[a] + (camera[b] - camera[a]) * f
-        return CGPoint(x: p.x, y: p.y)
     }
 
     /// Where the cursor is drawn at `time` (smoothed, or raw when smoothing is off).
@@ -260,20 +247,6 @@ public struct CursorTrack: Sendable {
             out[step] = SIMD4<Double>(p.x, p.y, v.x, v.y)
         }
         return out
-    }
-
-    /// Critically damped, slow follower of the cursor path for camera framing.
-    static func simulateCamera(smoothed: [SIMD4<Double>]) -> [SIMD2<Double>] {
-        guard let first = smoothed.first else { return [] }
-        let omega = 4.0, dt = 1 / rate
-        var p = SIMD2(first.x, first.y), v = SIMD2<Double>.zero
-        return smoothed.map { s in
-            let goal = SIMD2(s.x, s.y)
-            let a = (goal - p) * (omega * omega) - v * (2 * omega)
-            v += a * dt
-            p += v * dt
-            return p
-        }
     }
 
     /// Stretches with no movement or clicks longer than `delay`; the cursor hides inside them.

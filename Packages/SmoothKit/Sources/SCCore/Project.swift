@@ -17,6 +17,8 @@ public struct Project: Codable, Hashable, Identifiable, Sendable {
     public var motionBlur = MotionBlurSettings()
     public var autoZoom = AutoZoomSettings()
     public var zooms: [ZoomSegment] = []
+    /// Set once automatic zooms have been placed, so opening a project never overwrites edits.
+    public var autoZoomGenerated = false
     public var mockup = MockupSettings()
     public var cameraClips: [CameraClip] = []
     /// Kept ranges of the source; empty = whole recording.

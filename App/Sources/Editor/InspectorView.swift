@@ -136,21 +136,3 @@ private struct Swatch: View {
         .hoverState($hovering)
     }
 }
-
-private struct ZoomInspector: View {
-    @Bindable var model: EditorModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            SCSectionHeader("Auto zoom") {
-                SCBadge(text: "\(model.project?.zooms.count ?? 0) zooms")
-            }
-            Toggle("Place zooms automatically", isOn: model.binding(\.autoZoom.enabled, "Toggle Auto Zoom", coalesce: false))
-                .toggleStyle(.scSwitch)
-            SCSlider(title: "Default zoom", value: model.binding(\.autoZoom.defaultScale, "Change Zoom Scale"), in: 1.1...4,
-                     defaultValue: 2, format: { String(format: "%.1f×", $0) })
-            SCSlider(title: "Sensitivity", value: model.binding(\.autoZoom.sensitivity, "Change Sensitivity"), in: 0...1,
-                     defaultValue: 0.5, format: { "\(Int($0 * 100))%" })
-        }
-    }
-}

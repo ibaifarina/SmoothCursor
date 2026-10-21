@@ -37,6 +37,8 @@ final class EditorModel {
     var isEditingText = false
     /// Cursor motion and look, rebuilt whenever cursor settings or the cursor pack change.
     private(set) var cursorTrack: CursorTrack?
+    /// Camera motion from the zoom segments; rebuilt when zooms, framing or the cursor change.
+    private(set) var cameraTrack: CameraTrack?
     private(set) var telemetry: Telemetry?
     @ObservationIgnored var cursorPacks: CursorPackStore?
 
@@ -65,7 +67,15 @@ final class EditorModel {
                 telemetry = try? await Task.detached { try Telemetry(decoding: Data(contentsOf: telemetryURL)) }.value
             }
             project = loaded
+            // First open of a recording: place zooms automatically (not an undoable edit).
+            if !loaded.autoZoomGenerated, let telemetry {
+                var generated = loaded
+                AutoZoom.regenerate(&generated, telemetry: telemetry)
+                project = generated
+                autosaver.schedule(generated)
+            }
             rebuildCursorTrack()
+            rebuildCameraTrack()
             playback = PlaybackController(
                 url: ProjectPackage.mediaURL(loaded.recording.videoFile, in: url),
                 duration: loaded.recording.duration, fps: loaded.recording.fps
@@ -132,10 +142,28 @@ final class EditorModel {
         cursorTrack = CursorTrack(telemetry: telemetry, settings: project.cursor, sprites: sprites, duration: project.recording.duration)
     }
 
+    func rebuildCameraTrack() {
+        guard let project else { cameraTrack = nil; return }
+        cameraTrack = project.zooms.isEmpty ? nil : CameraTrack(project: project, cursor: cursorTrack)
+    }
+
+    /// Re-places automatic zooms (manual ones are kept) as one undoable edit.
+    func regenerateAutoZooms(_ actionName: String = "Regenerate Zooms", coalesce: Bool = false, _ change: (inout Project) -> Void = { _ in }) {
+        guard let telemetry else { return }
+        update(actionName, coalesce: coalesce) {
+            change(&$0)
+            AutoZoom.regenerate(&$0, telemetry: telemetry)
+        }
+    }
+
     private func apply(_ next: Project, actionName: String, undoTo previous: Project?) {
-        let cursorChanged = project?.cursor != next.cursor
+        let old = project
         project = next
+        let cursorChanged = old?.cursor != next.cursor
         if cursorChanged { rebuildCursorTrack() }
+        if cursorChanged || old?.zooms != next.zooms || old?.canvas != next.canvas || old?.recording != next.recording {
+            rebuildCameraTrack()
+        }
         autosaver.schedule(next)
         guard let previous, let undoManager else { return }
         undoManager.registerUndo(withTarget: self) { model in

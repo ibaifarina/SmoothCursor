@@ -83,6 +83,8 @@ Tip: steps 6 and 2 can run in parallel with others once step 3 exists.
 
 - [x] **Step 4 — Cursor system.** `CursorTrack`: spring-smoothed path precomputed at 240 Hz (smoothing amount → frequency, spring preset → damping), lookahead so the cursor doesn't lag, exact landing on clicks, idle hide that fades back in before movement, press shrink, motion tilt, slow camera path for follow-zoom. Cursor packs: captured macOS sprites, built-in vector "White" and "Dot", custom PNG import with hotspot picker (replace arrow / pointer / text / all). Renderer: linear premultiplied mipmapped sprites, ripple/pulse click effects. Zoom segments set to "follow cursor" now track it. Cursor inspector. (Click sound: with export, step 8.)
 
+- [x] **Step 5a — Auto-zoom engine.** `AutoZoom`: interests from clicks, typing bursts (focused on the clicked field), shortcuts and cursor rests (high sensitivity); merged by time, filtered by sensitivity, zoom level lowered so spread-out action fits; regenerate keeps manual zooms; runs on first open of a recording. `CameraTrack` (precomputed, resolution independent): dead-zone follow with the segment's spring, aimed where the cursor settles; segments < 0.9 s apart chain into pans (with a slight pull-back on long pans) instead of zooming out. Zoom inspector: auto toggle, zoom level, sensitivity (live), regenerate, zoom list.
+
 ## Build
 
 ```bash

@@ -17,7 +17,7 @@ struct CanvasStage: View {
             let size = FrameLayout.fit(aspect: aspect, in: CGRect(origin: .zero, size: geo.size)).size
             ZStack {
                 MetalPreview(
-                    project: project, playback: model.playback, cursorTrack: model.cursorTrack,
+                    project: project, playback: model.playback, cursorTrack: model.cursorTrack, cameraTrack: model.cameraTrack,
                     cropEditing: model.isCropping, packageURL: model.packageURL
                 )
                 if model.isCropping {
@@ -50,6 +50,7 @@ struct MetalPreview: NSViewRepresentable {
     let project: Project
     let playback: PlaybackController?
     let cursorTrack: CursorTrack?
+    let cameraTrack: CameraTrack?
     let cropEditing: Bool
     let packageURL: URL
 
@@ -66,6 +67,7 @@ struct MetalPreview: NSViewRepresentable {
     func updateNSView(_ view: PreviewView, context: Context) {
         view.playback = playback
         view.cursorTrack = cursorTrack
+        view.cameraTrack = cameraTrack
         view.cropEditing = cropEditing
         view.project = project
     }

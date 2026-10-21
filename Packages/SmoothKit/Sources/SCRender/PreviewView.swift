@@ -15,6 +15,11 @@ public final class PreviewView: NSView {
         didSet { setNeedsRender() }
     }
 
+    /// Camera motion from zoom segments (nil = no zooms).
+    public var cameraTrack: CameraTrack? {
+        didSet { setNeedsRender() }
+    }
+
     /// Shows the whole uncropped recording for crop editing.
     public var cropEditing = false {
         didSet { if cropEditing != oldValue { setNeedsRender() } }
@@ -135,7 +140,7 @@ public final class PreviewView: NSView {
         let size = metalLayer.drawableSize
         let layout = cropEditing
             ? FrameLayout.cropEditing(project: project, outputSize: size)
-            : FrameLayout.make(project: project, time: time, outputSize: size, cursor: cursorTrack)
+            : FrameLayout.make(project: project, time: time, outputSize: size, cursor: cursorTrack, camera: cameraTrack)
         compositor.encode(
             layout: layout, source: currentFrame?.texture, sourceChanged: frameChanged,
             into: drawable.texture, commandBuffer: commandBuffer
