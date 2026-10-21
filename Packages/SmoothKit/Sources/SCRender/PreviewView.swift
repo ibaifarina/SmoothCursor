@@ -15,6 +15,9 @@ public final class PreviewView: NSView {
         didSet { setNeedsRender() }
     }
 
+    private var clickPlayer: ClickPlayer?
+    private var lastClickTime: Seconds?
+
     public var keystrokeTrack: KeystrokeTrack? {
         didSet { setNeedsRender() }
     }
@@ -129,6 +132,7 @@ public final class PreviewView: NSView {
             }
         }
         let playing = playback?.isPlaying ?? false
+        playClicks(at: time, playing: playing)
         if dirty || playing {
             dirty = false
             idleTicks = 0
@@ -136,6 +140,22 @@ public final class PreviewView: NSView {
         } else {
             idleTicks += 1
             if idleTicks > 30, !(playback?.isSeeking ?? false) { link.isPaused = true }
+        }
+    }
+
+    /// Plays click sounds the playhead passed since the last frame (not across seeks or cuts).
+    private func playClicks(at time: Seconds, playing: Bool) {
+        defer { lastClickTime = playing ? time : nil }
+        guard playing, let project, project.cursor.clickSound, let cursorTrack else {
+            if !playing { clickPlayer?.stop() }
+            return
+        }
+        let player = clickPlayer ?? ClickPlayer()
+        clickPlayer = player
+        player.prepare()
+        guard let last = lastClickTime, time > last, time - last < 0.25 else { return }
+        if cursorTrack.clicks.contains(where: { $0.time > last && $0.time <= time }) {
+            player.play(volume: project.audio.master)
         }
     }
 

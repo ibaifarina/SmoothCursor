@@ -7,7 +7,7 @@ import SCRender
 import SwiftUI
 
 enum InspectorTab: String, CaseIterable, Identifiable {
-    case background, cursor, zoom, mockup, overlays, audio, export
+    case background, cursor, zoom, mockup, overlays, audio, presets, export
     var id: String { rawValue }
 
     var symbol: String {
@@ -18,6 +18,7 @@ enum InspectorTab: String, CaseIterable, Identifiable {
         case .mockup: "iphone"
         case .overlays: "text.bubble"
         case .audio: "speaker.wave.2"
+        case .presets: "square.stack.3d.up"
         case .export: "square.and.arrow.up"
         }
     }

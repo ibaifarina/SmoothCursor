@@ -48,7 +48,7 @@ struct RecorderView: View {
             .padding(.horizontal, 20)
             .padding(.bottom, 20)
         }
-        .frame(width: 640)
+        .frame(width: 720)
         .task { await refresh() }
         .onChange(of: recorder.sourceKind) { recorder.validateTarget() }
         .onChange(of: app.permissions.allRequiredGranted) { Task { await refresh() } }
@@ -330,38 +330,42 @@ private struct AudioSection: View {
     @Bindable var recorder: RecordingController
 
     var body: some View {
-        HStack(spacing: 24) {
+        VStack(alignment: .leading, spacing: 12) {
             Toggle(isOn: $recorder.settings.captureSystemAudio) {
                 Label(recorder.sourceKind == .iPhone ? "Device audio" : "System audio", systemImage: "speaker.wave.2.fill")
                     .labelStyle(SCLabelStyle())
             }
             .toggleStyle(.scSwitch)
-            .frame(width: 190)
-            SCDivider(vertical: true).frame(height: 22)
-            HStack(spacing: 10) {
-                Label("Microphone", systemImage: "mic.fill").labelStyle(SCLabelStyle())
-                Spacer(minLength: 0)
-                SCDropdown(
-                    selection: $recorder.settings.microphoneID,
-                    options: [SCDropdownOption(String?.none, "None", icon: "mic.slash")]
-                        + recorder.catalog.microphones.map { SCDropdownOption(Optional($0.id), $0.name, icon: "mic") },
-                    minWidth: 200, fill: true
-                )
-                .disabled(recorder.sourceKind == .iPhone)
-            }
-            SCDivider(vertical: true).frame(height: 22)
-            HStack(spacing: 10) {
-                Label("Camera", systemImage: "video.fill").labelStyle(SCLabelStyle())
-                Spacer(minLength: 0)
-                SCDropdown(
-                    selection: $recorder.settings.cameraID,
-                    options: [SCDropdownOption(String?.none, "None", icon: "video.slash")]
-                        + recorder.catalog.cameras.map { SCDropdownOption(Optional($0.id), $0.name, icon: "video") },
-                    minWidth: 180, fill: true
-                )
+            HStack(spacing: 20) {
+                device("Microphone", icon: "mic.fill") {
+                    SCDropdown(
+                        selection: $recorder.settings.microphoneID,
+                        options: [SCDropdownOption(String?.none, "None", icon: "mic.slash")]
+                            + recorder.catalog.microphones.map { SCDropdownOption(Optional($0.id), $0.name, icon: "mic") },
+                        minWidth: 160, fill: true
+                    )
+                    .disabled(recorder.sourceKind == .iPhone)
+                }
+                SCDivider(vertical: true).frame(height: 22)
+                device("Camera", icon: "video.fill") {
+                    SCDropdown(
+                        selection: $recorder.settings.cameraID,
+                        options: [SCDropdownOption(String?.none, "None", icon: "video.slash")]
+                            + recorder.catalog.cameras.map { SCDropdownOption(Optional($0.id), $0.name, icon: "video") },
+                        minWidth: 160, fill: true
+                    )
+                }
             }
         }
         .font(Typo.body)
+    }
+
+    private func device(_ title: String, icon: String, @ViewBuilder picker: () -> some View) -> some View {
+        HStack(spacing: 10) {
+            Label(title, systemImage: icon).labelStyle(SCLabelStyle()).fixedSize()
+            picker().frame(minWidth: 0, maxWidth: .infinity)
+        }
+        .frame(minWidth: 0, maxWidth: .infinity)
     }
 }
 

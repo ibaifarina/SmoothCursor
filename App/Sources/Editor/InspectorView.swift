@@ -48,6 +48,7 @@ struct InspectorView: View {
         case .mockup: MockupInspector(model: model)
         case .overlays: OverlaysInspector(model: model)
         case .audio: AudioInspector(model: model)
+        case .presets: PresetsInspector(model: model)
         case .export: ExportInspector(model: model)
         }
     }

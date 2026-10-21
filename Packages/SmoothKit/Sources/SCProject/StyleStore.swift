@@ -10,6 +10,20 @@ public final class StyleStore {
     struct File: Codable {
         var presets: [StylePreset] = []
         var defaultID: UUID?
+
+        init(presets: [StylePreset] = [], defaultID: UUID? = nil) { self.presets = presets; self.defaultID = defaultID }
+
+        /// A preset that no longer decodes (written by a newer version) is skipped, not fatal.
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            defaultID = try c.decodeIfPresent(UUID.self, forKey: .defaultID)
+            presets = (try c.decodeIfPresent([Lossy].self, forKey: .presets) ?? []).compactMap(\.value)
+        }
+
+        private struct Lossy: Decodable {
+            let value: StylePreset?
+            init(from decoder: Decoder) throws { value = try? StylePreset(from: decoder) }
+        }
     }
 
     public private(set) var presets: [StylePreset] = []
@@ -30,8 +44,8 @@ public final class StyleStore {
     public var defaultPreset: StylePreset? { presets.first { $0.id == defaultID } }
 
     @discardableResult
-    public func save(name: String, from project: Project) -> StylePreset {
-        let preset = StylePreset(name: name, from: project)
+    public func save(name: String, from project: Project, groups: Set<StylePreset.Group>) -> StylePreset {
+        let preset = StylePreset(name: name, from: project, groups: groups)
         presets.append(preset)
         write()
         return preset
@@ -40,7 +54,7 @@ public final class StyleStore {
     /// Replaces a preset's look with the project's, keeping its name and id.
     public func overwrite(_ id: UUID, from project: Project) {
         guard let i = presets.firstIndex(where: { $0.id == id }) else { return }
-        var preset = StylePreset(name: presets[i].name, from: project)
+        var preset = StylePreset(name: presets[i].name, from: project, groups: presets[i].includedGroups)
         preset.id = id
         presets[i] = preset
         write()
@@ -49,6 +63,18 @@ public final class StyleStore {
     public func delete(_ id: UUID) {
         presets.removeAll { $0.id == id }
         if defaultID == id { defaultID = nil }
+        write()
+    }
+
+    public func rename(_ id: UUID, to name: String) {
+        guard let i = presets.firstIndex(where: { $0.id == id }), !name.isEmpty else { return }
+        presets[i].name = name
+        write()
+    }
+
+    public func setGroups(_ id: UUID, _ groups: Set<StylePreset.Group>) {
+        guard let i = presets.firstIndex(where: { $0.id == id }) else { return }
+        presets[i].groups = groups
         write()
     }
 
