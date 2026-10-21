@@ -1,21 +1,15 @@
 import Foundation
 
-/// The synthesized mouse click mixed into exports and played in the preview.
+/// The mouse click mixed into exports and played in the preview.
 public enum ClickSound {
     public static let sampleRate = 48_000.0
 
-    /// A short, soft "tick": a damped high partial over a little body, with a noise transient. Mono.
+    /// A recorded mouse click, mono at `sampleRate`, starting right at the hit.
     public static let samples: [Float] = {
-        let n = Int(0.035 * sampleRate)
-        var state: UInt32 = 0x1234_5678
-        return (0..<n).map { i in
-            let t = Double(i) / sampleRate
-            state = state &* 1_664_525 &+ 1_013_904_223
-            let noise = Double(Int32(bitPattern: state)) / Double(Int32.max)
-            let tick = sin(2 * .pi * 2600 * t) * exp(-t / 0.0035) * 0.55
-            let body = sin(2 * .pi * 210 * t) * exp(-t / 0.009) * 0.35
-            let transient = noise * exp(-t / 0.0012) * 0.3
-            return Float((tick + body + transient) * 0.5)
+        let data = Data(base64Encoded: pcm16Base64, options: .ignoreUnknownCharacters) ?? Data()
+        return stride(from: 0, to: data.count - 1, by: 2).map { i in
+            let value = Int16(bitPattern: UInt16(data[data.startIndex + i]) | UInt16(data[data.startIndex + i + 1]) << 8)
+            return Float(value) / Float(Int16.max)
         }
     }()
 }
