@@ -1,0 +1,62 @@
+name: SmoothCursor
+options:
+  bundleIdPrefix: com.smoothcursor
+  deploymentTarget:
+    macOS: "26.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MACOSX_DEPLOYMENT_TARGET: "26.0"
+    ENABLE_HARDENED_RUNTIME: YES
+    # Stable signature so macOS keeps the Screen Recording permission across rebuilds.
+    CODE_SIGN_IDENTITY: "Apple Development"
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: L2DN68LPS5
+packages:
+  SmoothKit:
+    path: Packages/SmoothKit
+targets:
+  SmoothCursor:
+    type: application
+    platform: macOS
+    sources:
+      - App/Sources
+      - App/Resources
+    dependencies:
+      - package: SmoothKit
+        product: SmoothKit
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: Smooth Cursor
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        LSApplicationCategoryType: public.app-category.video
+        NSMicrophoneUsageDescription: Smooth Cursor records your microphone to narrate your screen recordings.
+        NSCameraUsageDescription: Smooth Cursor can record your camera as an overlay in your videos.
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: com.smoothcursor.project
+            UTTypeDescription: Smooth Cursor Project
+            UTTypeConformsTo: [com.apple.package, public.composite-content]
+            UTTypeTagSpecification:
+              public.filename-extension: [smoothcursor]
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Smooth Cursor Project
+            CFBundleTypeRole: Editor
+            LSHandlerRank: Owner
+            LSTypeIsPackage: true
+            LSItemContentTypes: [com.smoothcursor.project]
+    entitlements:
+      path: App/SmoothCursor.entitlements
+      properties:
+        com.apple.security.device.audio-input: true
+        com.apple.security.device.camera: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.smoothcursor.app
+        PRODUCT_NAME: Smooth Cursor
+        SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
+        SWIFT_APPROACHABLE_CONCURRENCY: YES
+        ENABLE_PREVIEWS: YES
+        GENERATE_INFOPLIST_FILE: NO

@@ -1,0 +1,25 @@
+// swift-tools-version: 6.2
+import PackageDescription
+
+let package = Package(
+    name: "SmoothKit",
+    platforms: [.macOS("26.0")],
+    products: [
+        .library(name: "SmoothKit", targets: ["SCCore", "SCCapture", "SCProject", "SCRender", "SCExport"]),
+    ],
+    targets: [
+        // Pure value types: project document, settings, telemetry. No AppKit, no I/O.
+        .target(name: "SCCore"),
+        // Permissions, ScreenCaptureKit recording, input telemetry.
+        .target(name: "SCCapture", dependencies: ["SCCore"]),
+        // .smoothcursor package I/O, library, autosave.
+        .target(name: "SCProject", dependencies: ["SCCore"]),
+        // Metal render graph shared by preview and export.
+        .target(name: "SCRender", dependencies: ["SCCore"]),
+        // Offline rendering to file via AVAssetWriter / VideoToolbox.
+        .target(name: "SCExport", dependencies: ["SCCore", "SCRender"]),
+        // Developer tool: `swift run sc-record --seconds 3` records the main display into a temp package.
+        .executableTarget(name: "sc-record", dependencies: ["SCCore", "SCCapture"]),
+        .testTarget(name: "SCCoreTests", dependencies: ["SCCore", "SCProject", "SCCapture"]),
+    ]
+)
