@@ -2,7 +2,7 @@ import SCCore
 import SCProject
 import SwiftUI
 
-/// Keystrokes, captions, blur regions and the webcam bubble.
+/// Keystrokes, captions and the webcam bubble; settings of the blur regions selected on the timeline.
 struct OverlaysInspector: View {
     @Bindable var model: EditorModel
     @State private var languages: [Locale] = []
@@ -12,9 +12,11 @@ struct OverlaysInspector: View {
 
     var body: some View {
         if let project {
+            if let region = project.redactions.first(where: { model.selectedBlurs.contains($0.id) }) {
+                SelectedBlurPanel(model: model, region: region, count: model.selectedBlurs.count)
+            }
             keystrokes(project)
             captions(project)
-            redactions(project)
             if project.recording.cameraFile != nil { webcam(project) }
         }
     }
@@ -23,16 +25,16 @@ struct OverlaysInspector: View {
 
     @ViewBuilder private func keystrokes(_ project: Project) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            SCSectionHeader("Keystrokes")
-            if !model.hasKeyData {
-                note("keyboard", "No keys were recorded. Keystrokes need Accessibility access while recording.")
-            }
+            SCSectionHeader("Keystrokes", info: model.hasKeyData
+                ? "Shows the keyboard shortcuts you pressed while recording."
+                : "No keys were recorded. Keystrokes need Accessibility access while recording.")
             Toggle("Show shortcuts", isOn: model.binding(\.keystrokes.enabled, "Toggle Keystrokes", coalesce: false))
                 .toggleStyle(.scSwitch)
             Group {
-                Toggle("Include typing", isOn: model.binding(\.keystrokes.showTyping, "Toggle Typing", coalesce: false))
-                    .toggleStyle(.scSwitch)
-                    .help("Shows typed text too. Check the video for passwords before sharing.")
+                Toggle(isOn: model.binding(\.keystrokes.showTyping, "Toggle Typing", coalesce: false)) {
+                    SCInfoLabel("Include typing", info: "Shows typed text too. Check the video for passwords before sharing.")
+                }
+                .toggleStyle(.scSwitch)
                 positionPicker(model.binding(\.keystrokes.position, "Move Keystrokes", coalesce: false))
                 SCSegmented(
                     selection: model.binding(\.keystrokes.lightStyle, "Change Keystroke Style", coalesce: false),
@@ -51,7 +53,7 @@ struct OverlaysInspector: View {
 
     @ViewBuilder private func captions(_ project: Project) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            SCSectionHeader("Captions") {
+            SCSectionHeader("Captions", info: "Transcribed on this Mac. Nothing leaves your computer.") {
                 if !project.captionSegments.isEmpty {
                     Toggle("Show captions", isOn: model.binding(\.captions.enabled, "Toggle Captions", coalesce: false))
                         .toggleStyle(.scSwitch).labelsHidden()
@@ -76,9 +78,6 @@ struct OverlaysInspector: View {
                 }
             } else if let error = model.captionError {
                 note("exclamationmark.triangle", error)
-            } else if project.captionSegments.isEmpty {
-                Text("Transcribed on this Mac. Nothing leaves your computer.")
-                    .font(Typo.label).foregroundStyle(Palette.textTertiary)
             }
 
             if !project.captionSegments.isEmpty {
@@ -111,32 +110,6 @@ struct OverlaysInspector: View {
         if !ids.contains(language) { ids.insert(language, at: 0) }
         return ids.map { id in
             SCDropdownOption(id, Locale.current.localizedString(forIdentifier: id) ?? id)
-        }
-    }
-
-    // MARK: Blur regions
-
-    @ViewBuilder private func redactions(_ project: Project) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            SCSectionHeader("Blur") {
-                Button(model.isDrawingRedaction ? "Cancel" : "Add", systemImage: model.isDrawingRedaction ? "xmark" : "plus") {
-                    model.isPickingFocus = false
-                    model.isDrawingRedaction.toggle()
-                }
-                .buttonStyle(.sc(.ghost, size: .small))
-                .disabled(project.mockup.isEnabled)
-            }
-            if project.mockup.isEnabled {
-                note("iphone", "Turn off the 3D phone to draw blur regions.")
-            } else if model.isDrawingRedaction {
-                note("rectangle.dashed", "Drag on the video over what should be hidden.")
-            } else if project.redactions.isEmpty {
-                Text("Hide passwords, emails and other private details.")
-                    .font(Typo.label).foregroundStyle(Palette.textTertiary)
-            }
-            ForEach(project.redactions) { region in
-                RedactionRow(model: model, region: region, index: (project.redactions.firstIndex(of: region) ?? 0) + 1)
-            }
         }
     }
 
@@ -257,106 +230,105 @@ private struct CaptionRow: View {
     }
 }
 
-private struct RedactionRow: View {
+/// Style of the blur regions selected on the timeline.
+private struct SelectedBlurPanel: View {
     @Bindable var model: EditorModel
     let region: RedactRegion
-    let index: Int
+    let count: Int
 
     var body: some View {
-        SCPanel {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Image(systemName: region.style == .blur ? "drop.halffull" : "squareshape.split.3x3")
-                        .foregroundStyle(Palette.textSecondary)
-                    Text("Region \(index)").font(Typo.label)
-                    Spacer()
-                    Button("Delete region", systemImage: "trash") {
-                        model.update("Delete Blur Region") { $0.redactions.removeAll { $0.id == region.id } }
-                    }
-                    .buttonStyle(.scIcon(size: 22))
-                }
-                SCSegmented(
-                    selection: Binding(
-                        get: { region.style },
-                        set: { style in edit("Change Blur Style") { $0.style = style } }
-                    ),
-                    options: [SCSegmentOption(RedactRegion.Style.blur, "Blur"), SCSegmentOption(.pixelate, "Pixelate")],
-                    fill: true
-                )
-                HStack(spacing: 6) {
-                    Button("Start \(time(region.range.start))", systemImage: "arrow.right.to.line") {
-                        let t = model.playback?.time ?? 0
-                        edit("Set Blur Start") { $0.range.start = min(t, $0.range.end - 0.1) }
-                    }
-                    .help("Start at the playhead")
-                    Button("End \(time(region.range.end))", systemImage: "arrow.left.to.line") {
-                        let t = model.playback?.time ?? 0
-                        edit("Set Blur End") { $0.range.end = max(t, $0.range.start + 0.1) }
-                    }
-                    .help("End at the playhead")
-                }
-                .buttonStyle(.sc(.secondary, size: .small))
+        VStack(alignment: .leading, spacing: 14) {
+            SCSectionHeader(count == 1 ? "Blur · \(region.range.start.clock)–\(region.range.end.clock)" : "\(count) blur regions") {
+                Button("Done") { model.clearSelection() }.buttonStyle(.sc(.ghost, size: .small))
             }
+            SCSegmented(
+                selection: Binding(
+                    get: { region.style },
+                    set: { style in model.updateSelectedBlurs("Change Blur Style") { $0.style = style } }
+                ),
+                options: [SCSegmentOption(RedactRegion.Style.blur, "Blur", icon: "drop.halffull"),
+                          SCSegmentOption(.pixelate, "Pixelate", icon: "squareshape.split.3x3")],
+                fill: true
+            )
+            Button(count == 1 ? "Delete Blur" : "Delete \(count) Blurs", systemImage: "trash") { model.deleteSelection() }
+                .buttonStyle(.sc(.destructive, size: .small))
         }
+        .padding(12)
+        .background(Palette.trackBlur.opacity(0.1), in: .rect(cornerRadius: Radius.l))
+        .overlay(RoundedRectangle(cornerRadius: Radius.l).strokeBorder(Palette.trackBlur.opacity(0.4)))
     }
+}
 
-    private func edit(_ name: String, _ change: @escaping (inout RedactRegion) -> Void) {
-        model.update(name, coalesce: false) { p in
-            guard let i = p.redactions.firstIndex(where: { $0.id == region.id }) else { return }
-            change(&p.redactions[i])
-        }
-    }
+/// Timeline Audio header button that opens the mixer.
+struct AudioSettingsButton: View {
+    @Bindable var model: EditorModel
+    @State private var open = false
 
-    private func time(_ t: Double) -> String {
-        String(format: "%d:%04.1f", Int(t) / 60, t.truncatingRemainder(dividingBy: 60))
+    var body: some View {
+        Button("Audio settings", systemImage: "slider.horizontal.3") { open.toggle() }
+            .buttonStyle(.scIcon(size: 22, active: open))
+            .help("Volume, mute and click sound")
+            .popover(isPresented: $open, arrowEdge: .trailing) {
+                AudioMixer(model: model)
+                    .frame(width: 290)
+                    .background(Palette.surface)
+                    .preferredColorScheme(.dark)
+            }
     }
 }
 
 /// Volume per audio track, plus the synthesized click sound.
-struct AudioInspector: View {
+struct AudioMixer: View {
     @Bindable var model: EditorModel
 
     var body: some View {
         if let project = model.project {
-            VStack(alignment: .leading, spacing: 14) {
-                SCSectionHeader("Tracks")
-                if model.audioTrackNames.isEmpty {
-                    Text("This recording has no audio.").font(Typo.label).foregroundStyle(Palette.textTertiary)
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 14) {
+                    SCSectionHeader("Tracks")
+                    if model.audioTrackNames.isEmpty {
+                        HStack(spacing: 8) {
+                            Image(systemName: "speaker.slash").foregroundStyle(Palette.textTertiary)
+                            Text("This recording has no audio.").font(Typo.label).foregroundStyle(Palette.textSecondary)
+                        }
+                    }
+                    ForEach(Array(model.audioTrackNames.enumerated()), id: \.offset) { i, name in
+                        track(i, name, project)
+                    }
+                    if !model.audioTrackNames.isEmpty {
+                        SCSlider(title: "Master", value: model.binding(\.audio.master, "Change Volume"), in: 0...2,
+                                 defaultValue: 1, format: percent)
+                    }
                 }
-                ForEach(Array(model.audioTrackNames.enumerated()), id: \.offset) { i, name in
-                    track(i, name, project.audio)
-                }
-                if !model.audioTrackNames.isEmpty {
-                    SCSlider(title: "Master", value: model.binding(\.audio.master, "Change Volume"), in: 0...2,
+                .padding(16)
+                SCDivider()
+                VStack(alignment: .leading, spacing: 14) {
+                    SCSectionHeader("Click sound", info: model.telemetry == nil
+                        ? "Needs cursor data, which this video doesn't have."
+                        : "Plays a mouse click on every click, in the preview and the export.") {
+                        Toggle("Click sound", isOn: model.binding(\.cursor.clickSound, "Toggle Click Sound", coalesce: false))
+                            .toggleStyle(.scSwitch).labelsHidden().fixedSize()
+                    }
+                    SCSlider(title: "Volume", value: model.binding(\.cursor.clickVolume, "Change Click Volume"), in: 0...2,
                              defaultValue: 1, format: percent)
+                        .disabled(!project.cursor.clickSound)
                 }
-            }
-
-            VStack(alignment: .leading, spacing: 14) {
-                SCSectionHeader("Effects")
-                Toggle("Click sound", isOn: model.binding(\.cursor.clickSound, "Toggle Click Sound", coalesce: false))
-                    .toggleStyle(.scSwitch)
-                    .disabled(model.telemetry == nil)
-                SCSlider(title: "Click volume", value: model.binding(\.cursor.clickVolume, "Change Click Volume"), in: 0...2,
-                         defaultValue: 1, format: { "\(Int(($0 * 100).rounded()))%" })
-                    .disabled(!(model.project?.cursor.clickSound ?? false) || model.telemetry == nil)
-            }
-
-            VStack(alignment: .leading, spacing: 10) {
-                SCSectionHeader("Trim")
-                Button("Remove idle parts", systemImage: "scissors") { model.trimIdle() }
-                    .buttonStyle(.sc(.secondary))
-                    .help("Cuts stretches longer than 2.5 s with no movement, input or sound")
-                if let message = model.idleTrimMessage {
-                    Text(message).font(Typo.label).foregroundStyle(Palette.textSecondary)
-                }
+                .padding(16)
+                .disabled(model.telemetry == nil)
             }
         }
     }
 
-    private func track(_ i: Int, _ name: String, _ audio: AudioSettings) -> some View {
+    private func track(_ i: Int, _ name: String, _ project: Project) -> some View {
+        let audio = project.audio
         let muted = audio.muted.indices.contains(i) && audio.muted[i]
+        let kind = project.recording.audioTracks.flatMap { $0.indices.contains(i) ? $0[i].kind : nil }
         return HStack(alignment: .bottom, spacing: 10) {
+            Image(systemName: icon(kind))
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(muted ? Palette.textTertiary : Palette.success)
+                .frame(width: 26, height: 26)
+                .background(Palette.raised, in: .rect(cornerRadius: Radius.s))
             SCSlider(
                 title: name,
                 value: Binding(
@@ -378,6 +350,16 @@ struct AudioInspector: View {
                 }
             }
             .buttonStyle(.scIcon(size: 26, active: muted))
+            .help(muted ? "Unmute" : "Mute")
+        }
+    }
+
+    private func icon(_ kind: AudioTrackInfo.Kind?) -> String {
+        switch kind {
+        case .microphone: "mic.fill"
+        case .system: "desktopcomputer"
+        case .device: "iphone"
+        case nil: "waveform"
         }
     }
 

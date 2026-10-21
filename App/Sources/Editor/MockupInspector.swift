@@ -13,15 +13,11 @@ struct MockupInspector: View {
             SelectedShotPanel(model: model, shot: shot, count: model.selectedShots.count)
         }
         VStack(alignment: .leading, spacing: 14) {
-            SCSectionHeader("Device")
+            SCSectionHeader("Device", info: "Put the recording on a 3D phone. The timeline then shows camera shots instead of zooms.")
             SCSegmented(selection: Binding(get: { mockup.device }, set: { model.setMockup($0) }), options: [
                 SCSegmentOption(MockupSettings.Device.none, "Flat", icon: "rectangle"),
                 SCSegmentOption(.phone, "iPhone", icon: "iphone"),
             ], fill: true)
-            if !mockup.isEnabled {
-                Text("Put the recording on a 3D phone, with camera shots you place on the Camera track.")
-                    .font(Typo.label).foregroundStyle(Palette.textTertiary).fixedSize(horizontal: false, vertical: true)
-            }
         }
 
         if mockup.isEnabled {
@@ -67,12 +63,11 @@ struct MockupInspector: View {
             }
 
             VStack(alignment: .leading, spacing: 12) {
-                SCSectionHeader("Camera") { SCBadge(text: "\(shots.count) shots") }
-                Button("Auto camera", systemImage: "wand.and.stars") { model.autoCamera() }
-                    .buttonStyle(.sc(.secondary, size: .small))
-                    .help("Close-ups where the zooms are, varied shots in between. Replaces the current shots.")
+                SCSectionHeader("Camera", info: "Auto camera places close-ups where the zooms are and varied shots in between, replacing the current shots. The presets below add a shot at the playhead.") {
+                    SCBadge(text: "\(shots.count) shots")
+                }
+                AutoCameraButton(model: model)
                 if model.selectedShots.isEmpty {
-                    Text("Add a shot at the playhead:").font(Typo.caption).foregroundStyle(Palette.textTertiary)
                     LazyVGrid(columns: [GridItem(.flexible(), spacing: 6), GridItem(.flexible(), spacing: 6)], spacing: 6) {
                         ForEach(CameraPreset.allCases, id: \.self) { preset in
                             ShotPresetButton(preset: preset, selected: false) { model.applyShot(preset) }
@@ -139,6 +134,64 @@ private struct EnvironmentCard: View {
             if image == nil {
                 image = await Task.detached(priority: .utility) { MockupPreviews.environmentThumbnail(environment) }.value
             }
+        }
+    }
+}
+
+/// Adds a camera shot at the playhead, after picking its kind in a popover.
+struct AddShotButton: View {
+    @Bindable var model: EditorModel
+    /// Icon only (timeline track header) instead of "+ Shot".
+    let compact: Bool
+    @State private var open = false
+
+    var body: some View {
+        Group {
+            if compact {
+                Button("Add shot", systemImage: "plus") { open.toggle() }
+                    .buttonStyle(.scIcon(size: 22, active: open))
+            } else {
+                Button("Shot", systemImage: "plus") { open.toggle() }
+                    .buttonStyle(.sc(.ghost, size: .small))
+            }
+        }
+        .help(model.canAddShot ? "Add a camera shot at the playhead (Z)" : "The playhead is inside a shot")
+        .disabled(!model.canAddShot)
+        .popover(isPresented: $open, arrowEdge: compact ? .trailing : .top) {
+            VStack(alignment: .leading, spacing: 10) {
+                SCSectionHeader("Add shot")
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 6), GridItem(.flexible(), spacing: 6)], spacing: 6) {
+                    ForEach(CameraPreset.allCases, id: \.self) { preset in
+                        ShotPresetButton(preset: preset, selected: false) {
+                            model.addShot(preset, at: model.playheadTime)
+                            open = false
+                        }
+                    }
+                }
+            }
+            .padding(14)
+            .frame(width: 290)
+            .background(Palette.surface)
+            .preferredColorScheme(.dark)
+        }
+    }
+}
+
+/// Rebuilds the camera shots, asking first when that replaces existing ones.
+struct AutoCameraButton: View {
+    @Bindable var model: EditorModel
+    @State private var confirming = false
+
+    var body: some View {
+        Button("Auto camera", systemImage: "wand.and.stars") {
+            if model.project?.cameraClips.isEmpty ?? true { model.autoCamera() } else { confirming = true }
+        }
+        .buttonStyle(.sc(.secondary, size: .small))
+        .alert("Replace camera shots?", isPresented: $confirming) {
+            Button("Replace", role: .destructive) { model.autoCamera() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Auto camera replaces all current shots, including ones you edited. You can undo with ⌘Z.")
         }
     }
 }

@@ -29,8 +29,22 @@ final class CameraRecorder: NSObject, @unchecked Sendable, AVCaptureVideoDataOut
         session.commitConfiguration()
     }
 
-    func start() {
-        queue.async { self.session.startRunning() }
+    /// Resumed by the first camera frame (accessed on `queue`).
+    private var firstFrame: CheckedContinuation<Void, Never>?
+
+    /// Starts the camera and returns once it delivers frames (cameras take a moment to wake up),
+    /// or after `timeout`, so the screen recording doesn't begin before the webcam.
+    func start(timeout: Duration = .seconds(5)) async {
+        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+            queue.async {
+                self.firstFrame = c
+                self.session.startRunning()
+            }
+            queue.asyncAfter(deadline: .now() + Double(timeout.components.seconds)) {
+                self.firstFrame?.resume()
+                self.firstFrame = nil
+            }
+        }
     }
 
     /// Stops and finishes the file. Returns false if nothing was recorded.
@@ -61,5 +75,7 @@ final class CameraRecorder: NSObject, @unchecked Sendable, AVCaptureVideoDataOut
             writer?.startsClock = false
         }
         writer?.appendVideo(sampleBuffer)
+        firstFrame?.resume()
+        firstFrame = nil
     }
 }

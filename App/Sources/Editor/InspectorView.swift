@@ -4,65 +4,78 @@ import SwiftUI
 struct InspectorView: View {
     @Bindable var model: EditorModel
 
+    /// The cursor tab needs cursor data; without it the panel falls back to the background.
+    private var tab: InspectorTab {
+        model.inspectorTab == .cursor && model.telemetry == nil ? .background : model.inspectorTab
+    }
+
     var body: some View {
         HStack(spacing: 0) {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 18) {
-                        Color.clear.frame(height: 0).id("top")
-                        content
+            VStack(spacing: 0) {
+                HStack(spacing: 8) {
+                    Text(tab.title).font(Typo.title)
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .frame(height: 44)
+                SCDivider()
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 0) {
+                            Color.clear.frame(height: 0).id("top")
+                            // Each top-level piece of a tab is a section, separated by hairlines.
+                            Group(subviews: content) { sections in
+                                ForEach(sections) { section in
+                                    section
+                                        .padding(.horizontal, 16)
+                                        .padding(.vertical, 14)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                    if section.id != sections.last?.id { SCDivider() }
+                                }
+                            }
+                        }
+                        .padding(.bottom, 12)
                     }
-                    .padding(16)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .scrollIndicators(.never)
-                // Selecting something shows its settings, which sit at the top of the panel.
-                .onChange(of: model.selectedShots) { _, ids in
-                    if !ids.isEmpty { withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("top", anchor: .top) } }
-                }
-                .onChange(of: model.selectedZooms) { _, ids in
-                    if !ids.isEmpty { withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("top", anchor: .top) } }
+                    .scrollIndicators(.never)
+                    // Selecting something shows its settings, which sit at the top of the panel.
+                    .onChange(of: model.selectedShots) { _, ids in
+                        if !ids.isEmpty { withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("top", anchor: .top) } }
+                    }
+                    .onChange(of: model.selectedZooms) { _, ids in
+                        if !ids.isEmpty { withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("top", anchor: .top) } }
+                    }
+                    .onChange(of: model.selectedBlurs) { _, ids in
+                        if !ids.isEmpty { withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("top", anchor: .top) } }
+                    }
                 }
             }
             SCDivider(vertical: true)
             VStack(spacing: 4) {
-                ForEach(InspectorTab.allCases) { tab in
-                    Button(tab.title, systemImage: tab.symbol) {
-                        withAnimation(.easeOut(duration: 0.15)) { model.inspectorTab = tab }
+                ForEach(InspectorTab.allCases) { item in
+                    let unavailable = item == .cursor && model.telemetry == nil
+                    Button(item.title, systemImage: item.symbol) {
+                        withAnimation(.easeOut(duration: 0.15)) { model.inspectorTab = item }
                     }
-                    .buttonStyle(.scIcon(size: 32, active: model.inspectorTab == tab))
-                    .help(tab.title)
+                    .buttonStyle(.scIcon(size: 32, active: tab == item))
+                    .disabled(unavailable)
+                    .help(unavailable ? "Cursor: this video has no cursor data" : item.title)
                 }
                 Spacer()
             }
-            .padding(.vertical, 12)
+            .padding(.vertical, 8)
             .padding(.horizontal, 6)
         }
     }
 
     @ViewBuilder private var content: some View {
-        switch model.inspectorTab {
+        switch tab {
         case .background: BackgroundInspector(model: model)
         case .cursor: CursorInspector(model: model)
         case .zoom: ZoomInspector(model: model)
         case .mockup: MockupInspector(model: model)
         case .overlays: OverlaysInspector(model: model)
-        case .audio: AudioInspector(model: model)
         case .presets: PresetsInspector(model: model)
         case .export: ExportInspector(model: model)
-        }
-    }
-
-    private func comingSoon(_ title: String, step: Int, icon: String) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            SCSectionHeader(title)
-            SCPanel {
-                HStack(spacing: 10) {
-                    Image(systemName: icon).foregroundStyle(Palette.textTertiary)
-                    Text("Arrives in step \(step).").font(Typo.label).foregroundStyle(Palette.textSecondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
         }
     }
 }

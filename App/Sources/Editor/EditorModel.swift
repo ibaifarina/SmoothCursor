@@ -7,7 +7,7 @@ import SCRender
 import SwiftUI
 
 enum InspectorTab: String, CaseIterable, Identifiable {
-    case background, cursor, zoom, mockup, overlays, audio, presets, export
+    case background, cursor, zoom, mockup, overlays, presets, export
     var id: String { rawValue }
 
     var symbol: String {
@@ -17,13 +17,17 @@ enum InspectorTab: String, CaseIterable, Identifiable {
         case .zoom: "plus.magnifyingglass"
         case .mockup: "iphone"
         case .overlays: "text.bubble"
-        case .audio: "speaker.wave.2"
         case .presets: "square.stack.3d.up"
         case .export: "square.and.arrow.up"
         }
     }
 
-    var title: String { rawValue.capitalized }
+    var title: String {
+        switch self {
+        case .mockup: "Device"
+        default: rawValue.capitalized
+        }
+    }
 }
 
 /// State of one open project. Every mutation goes through `update` so it is autosaved and undoable.
@@ -49,6 +53,7 @@ final class EditorModel {
     // Timeline
     var selectedZooms: Set<UUID> = []
     var selectedShots: Set<UUID> = []
+    var selectedBlurs: Set<UUID> = []
     var selectedClip: Int?
     /// Timeline magnification: 1 = whole recording fits the width.
     var timelineZoom = 1.0
@@ -214,17 +219,29 @@ final class EditorModel {
 
     // MARK: Extras
 
+    /// Short message shown over the canvas for a moment (results of one-shot actions).
+    private(set) var toast: String?
+    @ObservationIgnored private var toastTask: Task<Void, Never>?
+
+    func showToast(_ message: String) {
+        toast = message
+        toastTask?.cancel()
+        toastTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2.5))
+            guard !Task.isCancelled else { return }
+            self?.toast = nil
+        }
+    }
+
     /// Removes long stretches where nothing happens (no movement, input or sound).
     func trimIdle() {
         guard let project else { return }
         let kept = IdleTrim.keptRanges(project: project, telemetry: telemetry, peaks: waveform)
         let removed = Cuts.editedDuration(project) - kept.map(\.duration).reduce(0, +)
-        guard removed > 0.2 else { idleTrimMessage = "No idle parts found."; return }
+        guard removed > 0.2 else { showToast("No idle parts found"); return }
         update("Trim Idle Parts") { $0.cuts = kept }
-        idleTrimMessage = String(format: "Removed %.1f s of idle time.", removed)
+        showToast(String(format: "Removed %.1f s of idle time · ⌘Z to undo", removed))
     }
-
-    var idleTrimMessage: String?
 
     func generateCaptions(language: String) async {
         guard let project else { return }
@@ -250,12 +267,41 @@ final class EditorModel {
         }
     }
 
+    /// Starts (or cancels) drawing a blur region on the canvas.
+    func toggleBlurDrawing() {
+        isPickingFocus = false
+        isDrawingRedaction.toggle()
+    }
+
+    /// Adds a blur region starting at the playhead, in free space on the blur track when there is some.
     func addRedaction(_ rect: UnitRect) {
         guard let project else { return }
-        update("Add Blur Region") {
-            $0.redactions.append(RedactRegion(range: TimeRange(start: 0, end: project.recording.duration), rect: rect))
-        }
+        let duration = project.recording.duration
+        let t = min(playheadTime, max(duration - TimelineEdits.minDuration, 0))
+        let range = TimelineEdits.freeRange(at: t, in: project.redactions, duration: duration, length: 4)
+            ?? TimeRange(start: t, end: min(t + 4, duration))
+        let region = RedactRegion(range: range, rect: rect)
+        update("Add Blur Region") { $0.redactions.append(region) }
         isDrawingRedaction = false
+        select(blur: region.id)
+    }
+
+    func select(blur id: UUID, extend: Bool = false) {
+        selectedClip = nil
+        selectedZooms = []
+        selectedShots = []
+        if extend {
+            if selectedBlurs.contains(id) { selectedBlurs.remove(id) } else { selectedBlurs.insert(id) }
+        } else {
+            selectedBlurs = [id]
+        }
+        inspectorTab = .overlays
+    }
+
+    func updateSelectedBlurs(_ actionName: String, _ change: @escaping (inout RedactRegion) -> Void) {
+        let ids = selectedBlurs
+        guard !ids.isEmpty else { return }
+        update(actionName) { $0.redactions = TimelineEdits.update($0.redactions, ids: ids, change) }
     }
 
     private func syncPlaybackCuts() {
@@ -266,6 +312,25 @@ final class EditorModel {
     // MARK: Timeline actions
 
     var playheadTime: Seconds { playback?.time ?? 0 }
+
+    /// The timeline shows camera shots while the 3D phone is on, zooms otherwise.
+    var showsShots: Bool { project?.mockup.isEnabled ?? false }
+
+    /// Whether there's room at the playhead for a new shot (it isn't inside one).
+    var canAddShot: Bool {
+        guard let project else { return false }
+        return TimelineEdits.freeRange(at: playheadTime, in: project.cameraClips, duration: project.recording.duration, length: 4) != nil
+    }
+
+    var canAddZoom: Bool {
+        guard let project else { return false }
+        return TimelineEdits.freeRange(at: playheadTime, in: project.zooms, duration: project.recording.duration, length: 2.5) != nil
+    }
+
+    /// Adds a zoom, or a camera shot while the 3D phone is on, at the playhead.
+    func addMotionAtPlayhead() {
+        if showsShots { addShot(at: playheadTime) } else { addZoomAtPlayhead() }
+    }
 
     func addZoomAtPlayhead() {
         guard let project, let zoom = ZoomEdits.insertion(at: playheadTime, in: project.zooms, duration: project.recording.duration,
@@ -284,6 +349,7 @@ final class EditorModel {
     func select(zoom id: UUID, extend: Bool = false) {
         selectedClip = nil
         selectedShots = []
+        selectedBlurs = []
         if extend {
             if selectedZooms.contains(id) { selectedZooms.remove(id) } else { selectedZooms.insert(id) }
         } else {
@@ -292,18 +358,42 @@ final class EditorModel {
         inspectorTab = .zoom
     }
 
-    func selectAllZooms() {
+    /// Selects every item on the motion track (zooms, or shots while the 3D phone is on).
+    func selectAllMotion() {
         selectedClip = nil
-        selectedZooms = Set(project?.zooms.map(\.id) ?? [])
-        if !selectedZooms.isEmpty { inspectorTab = .zoom }
+        selectedBlurs = []
+        if showsShots {
+            selectedZooms = []
+            selectedShots = Set(project?.cameraClips.map(\.id) ?? [])
+            if !selectedShots.isEmpty { inspectorTab = .mockup }
+        } else {
+            selectedShots = []
+            selectedZooms = Set(project?.zooms.map(\.id) ?? [])
+            if !selectedZooms.isEmpty { inspectorTab = .zoom }
+        }
+    }
+
+    func select(clip index: Int) {
+        selectedZooms = []
+        selectedShots = []
+        selectedBlurs = []
+        selectedClip = index
     }
 
     func clearSelection() {
         isDrawingRedaction = false
         selectedZooms = []
         selectedShots = []
+        selectedBlurs = []
         selectedClip = nil
         isPickingFocus = false
+    }
+
+    /// Whether Delete would remove something. The only clip can't be deleted.
+    var canDelete: Bool {
+        guard let project else { return false }
+        if !selectedShots.isEmpty || !selectedZooms.isEmpty || !selectedBlurs.isEmpty { return true }
+        return selectedClip != nil && Cuts.kept(project).count > 1
     }
 
     func updateSelectedZooms(_ actionName: String, coalesce: Bool = false, _ change: @escaping (inout ZoomSegment) -> Void) {
@@ -313,7 +403,11 @@ final class EditorModel {
     }
 
     func deleteSelection() {
-        if !selectedShots.isEmpty {
+        if !selectedBlurs.isEmpty {
+            let ids = selectedBlurs
+            update(ids.count == 1 ? "Delete Blur Region" : "Delete Blur Regions") { $0.redactions.removeAll { ids.contains($0.id) } }
+            selectedBlurs = []
+        } else if !selectedShots.isEmpty {
             let ids = selectedShots
             update(ids.count == 1 ? "Delete Shot" : "Delete Shots") { $0.cameraClips.removeAll { ids.contains($0.id) } }
             selectedShots = []
@@ -332,6 +426,7 @@ final class EditorModel {
     func select(shot id: UUID, extend: Bool = false) {
         selectedClip = nil
         selectedZooms = []
+        selectedBlurs = []
         if extend {
             if selectedShots.contains(id) { selectedShots.remove(id) } else { selectedShots.insert(id) }
         } else {
@@ -414,6 +509,7 @@ final class EditorModel {
         // Drop selections that no longer exist (undo, delete).
         selectedZooms.formIntersection(next.zooms.map(\.id))
         selectedShots.formIntersection(next.cameraClips.map(\.id))
+        selectedBlurs.formIntersection(next.redactions.map(\.id))
         if let clip = selectedClip, clip >= Cuts.kept(next).count { selectedClip = nil }
         autosaver.schedule(next)
         guard let previous, let undoManager else { return }

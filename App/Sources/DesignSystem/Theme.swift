@@ -24,6 +24,7 @@ enum Palette {
     static let trackVideo = Color(hex: 0x3A5BD9)
     static let trackZoom = Color(hex: 0x1FA58A)
     static let trackCamera = Color(hex: 0x8B5CF6)
+    static let trackBlur = Color(hex: 0xC2417A)
 }
 
 enum Radius {
@@ -41,6 +42,7 @@ enum Typo {
     static let title = Font.system(size: 15, weight: .semibold)
     static let largeTitle = Font.system(size: 26, weight: .semibold)
     static let section = Font.system(size: 10.5, weight: .semibold)
+    static let sectionTitle = Font.system(size: 12, weight: .semibold)
     static let mono = Font.system(size: 12, weight: .medium).monospacedDigit()
 }
 

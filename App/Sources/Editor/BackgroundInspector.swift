@@ -38,7 +38,7 @@ struct BackgroundInspector: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            SCSectionHeader("Background")
+            SCSectionHeader("Fill")
             SCSegmented(selection: Binding(get: { kind }, set: { switchKind($0) }), options: [
                 SCSegmentOption(BackgroundKind.color, "Color", icon: "circle.fill"),
                 SCSegmentOption(.gradient, "Gradient", icon: "circle.lefthalf.filled"),

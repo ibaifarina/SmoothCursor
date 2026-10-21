@@ -15,6 +15,10 @@ extension CameraClip: TimelineItem {
     public mutating func markEdited() {}
 }
 
+extension RedactRegion: TimelineItem {
+    public mutating func markEdited() {}
+}
+
 public typealias ZoomEdits = TimelineEdits
 
 /// Pure timeline editing operations, shared by the timeline UI and tests.

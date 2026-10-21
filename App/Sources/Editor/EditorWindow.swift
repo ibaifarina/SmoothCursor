@@ -63,6 +63,19 @@ private struct EditorLayout: View {
                     .padding(24)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Palette.canvas)
+                    .overlay(alignment: .bottom) {
+                        if let toast = model.toast {
+                            Text(toast)
+                                .font(Typo.label)
+                                .padding(.horizontal, 12).frame(height: 28)
+                                .background(Palette.raised, in: .capsule)
+                                .overlay(Capsule().strokeBorder(Palette.strokeStrong))
+                                .shadow(color: .black.opacity(0.4), radius: 10, y: 4)
+                                .padding(.bottom, 12)
+                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                        }
+                    }
+                    .animation(.spring(duration: 0.3), value: model.toast)
                 SCDivider(vertical: true)
                 InspectorView(model: model)
                     .frame(width: 304)
@@ -181,16 +194,27 @@ private struct TransportBar: View {
     var body: some View {
         ZStack {
             HStack(spacing: 8) {
-                Button("Zoom", systemImage: "plus") { model.addZoomAtPlayhead() }
-                    .buttonStyle(.sc(.ghost, size: .small))
-                    .help("Add a zoom at the playhead (Z)")
+                if model.showsShots {
+                    AddShotButton(model: model, compact: false)
+                } else {
+                    Button("Zoom", systemImage: "plus") { model.addMotionAtPlayhead() }
+                        .buttonStyle(.sc(.ghost, size: .small))
+                        .help(model.canAddZoom ? "Add a zoom at the playhead (Z)" : "The playhead is inside a zoom")
+                        .disabled(!model.canAddZoom)
+                    Button("Blur", systemImage: model.isDrawingRedaction ? "xmark" : "plus") { model.toggleBlurDrawing() }
+                        .buttonStyle(.sc(.ghost, size: .small))
+                        .help(model.isDrawingRedaction ? "Cancel (Esc)" : "Drag over the video to hide private details (B)")
+                }
                 Button("Split", systemImage: "scissors") { model.splitAtPlayhead() }
                     .buttonStyle(.sc(.ghost, size: .small))
                     .help("Split the video at the playhead (S)")
+                Button("Trim Idle", systemImage: "scissors.badge.ellipsis") { model.trimIdle() }
+                    .buttonStyle(.sc(.ghost, size: .small))
+                    .help("Cut stretches longer than 2.5 s with no movement, input or sound")
                 Button("Delete", systemImage: "trash") { model.deleteSelection() }
                     .buttonStyle(.scIcon())
                     .help("Delete selection (⌫)")
-                    .disabled(model.selectedZooms.isEmpty && model.selectedClip == nil)
+                    .disabled(!model.canDelete)
                 Spacer()
                 Button("Crop", systemImage: "crop") {
                     withAnimation(.spring(duration: 0.3)) { model.isCropping.toggle() }
@@ -263,8 +287,9 @@ private struct EditorShortcuts: View {
                 Button("End") { playback.seek(to: playback.duration) }.keyboardShortcut(.end, modifiers: [])
                 Button("Delete") { model.deleteSelection() }.keyboardShortcut(.delete, modifiers: [])
                 Button("Split") { model.splitAtPlayhead() }.keyboardShortcut("s", modifiers: [])
-                Button("Add Zoom") { model.addZoomAtPlayhead() }.keyboardShortcut("z", modifiers: [])
-                Button("Select All Zooms") { model.selectAllZooms() }.keyboardShortcut("a", modifiers: .command)
+                Button("Add Zoom or Shot") { model.addMotionAtPlayhead() }.keyboardShortcut("z", modifiers: [])
+                Button("Add Blur") { if !model.showsShots { model.toggleBlurDrawing() } }.keyboardShortcut("b", modifiers: [])
+                Button("Select All") { model.selectAllMotion() }.keyboardShortcut("a", modifiers: .command)
                 Button("Deselect") { model.clearSelection() }.keyboardShortcut(.escape, modifiers: [])
                 Button("Zoom In Timeline") { model.timelineZoom = min(model.timelineZoom * 1.6, 64) }.keyboardShortcut("=", modifiers: .command)
                 Button("Zoom Out Timeline") { model.timelineZoom = max(model.timelineZoom / 1.6, 1) }.keyboardShortcut("-", modifiers: .command)

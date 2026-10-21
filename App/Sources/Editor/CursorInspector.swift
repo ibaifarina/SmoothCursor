@@ -29,16 +29,6 @@ struct CursorInspector: View {
     private var cursor: CursorSettings { model.project?.cursor ?? CursorSettings() }
 
     var body: some View {
-        if model.telemetry == nil {
-            SCPanel {
-                HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: "cursorarrow.slash").foregroundStyle(Palette.textTertiary)
-                    Text("This video has no cursor data. Cursor effects work on recordings made with Smooth Cursor.")
-                        .font(Typo.label).foregroundStyle(Palette.textSecondary)
-                }
-            }
-        }
-
         VStack(alignment: .leading, spacing: 14) {
             SCSectionHeader("Cursor")
             Toggle("Show cursor", isOn: model.binding(\.cursor.visible, "Toggle Cursor", coalesce: false))
@@ -87,9 +77,10 @@ struct CursorInspector: View {
                 options: CursorSettings.ClickEffect.allCases.map { SCSegmentOption($0, $0.rawValue.capitalized) },
                 fill: true
             )
-            Toggle("Click sound", isOn: model.binding(\.cursor.clickSound, "Toggle Click Sound", coalesce: false))
-                .toggleStyle(.scSwitch)
-                .help("Plays a mouse click sound on every click, in the preview and the export")
+            Toggle(isOn: model.binding(\.cursor.clickSound, "Toggle Click Sound", coalesce: false)) {
+                SCInfoLabel("Click sound", info: "Plays a mouse click on every click, in the preview and the export.")
+            }
+            .toggleStyle(.scSwitch)
             SCSlider(title: "Click volume", value: model.binding(\.cursor.clickVolume, "Change Click Volume"), in: 0...2,
                      defaultValue: 1, format: { "\(Int(($0 * 100).rounded()))%" })
                 .disabled(!cursor.clickSound)

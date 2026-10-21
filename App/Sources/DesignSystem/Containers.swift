@@ -13,25 +13,82 @@ struct SCPanel<Content: View>: View {
     }
 }
 
-/// Small uppercase section heading.
+/// Section heading, with an optional (i) explanation and trailing controls.
 struct SCSectionHeader: View {
     let title: String
+    var info: String?
     var trailing: AnyView?
 
-    init(_ title: String) { self.title = title }
-    init(_ title: String, @ViewBuilder trailing: () -> some View) {
+    init(_ title: String, info: String? = nil) { self.title = title; self.info = info }
+    init(_ title: String, info: String? = nil, @ViewBuilder trailing: () -> some View) {
         self.title = title
+        self.info = info
         self.trailing = AnyView(trailing())
     }
 
     var body: some View {
-        HStack {
-            Text(title.uppercased())
-                .font(Typo.section)
-                .tracking(0.8)
-                .foregroundStyle(Palette.textTertiary)
-            Spacer()
+        HStack(spacing: 6) {
+            Text(title)
+                .font(Typo.sectionTitle)
+                .foregroundStyle(Palette.text)
+            if let info { SCInfo(info) }
+            Spacer(minLength: 8)
             trailing
+        }
+        .frame(minHeight: 22)
+    }
+}
+
+/// Small (i) icon that explains something in a popover on hover.
+struct SCInfo: View {
+    let text: String
+    @State private var hovering = false
+    @State private var shown = false
+
+    init(_ text: String) { self.text = text }
+
+    var body: some View {
+        Image(systemName: "info.circle")
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(hovering ? Palette.textSecondary : Palette.textTertiary)
+            .frame(width: 16, height: 16)
+            .contentShape(.rect)
+            .onHover { inside in
+                hovering = inside
+                if inside {
+                    // Short delay so passing over the icon doesn't flash a popover.
+                    Task {
+                        try? await Task.sleep(for: .milliseconds(250))
+                        if hovering { shown = true }
+                    }
+                } else {
+                    shown = false
+                }
+            }
+            .popover(isPresented: $shown, arrowEdge: .bottom) {
+                Text(text)
+                    .font(Typo.label)
+                    .foregroundStyle(Palette.textSecondary)
+                    .frame(width: 230, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 12).padding(.vertical, 10)
+                    .preferredColorScheme(.dark)
+            }
+            .accessibilityLabel(text)
+    }
+}
+
+/// Control label followed by an (i) explanation, for toggles.
+struct SCInfoLabel: View {
+    let title: String
+    let info: String
+
+    init(_ title: String, info: String) { self.title = title; self.info = info }
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Text(title)
+            SCInfo(info)
         }
     }
 }

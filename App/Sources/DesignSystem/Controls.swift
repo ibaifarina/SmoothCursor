@@ -72,7 +72,7 @@ private struct SCSwitchBody: View {
         } label: {
             HStack(spacing: 10) {
                 configuration.label
-                    .font(Typo.body)
+                    .font(Typo.label)
                     .foregroundStyle(Palette.text)
                 Spacer(minLength: 0)
                 Capsule()

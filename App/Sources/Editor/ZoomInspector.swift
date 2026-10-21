@@ -3,6 +3,7 @@ import SwiftUI
 
 struct ZoomInspector: View {
     @Bindable var model: EditorModel
+    @State private var confirmingRegenerate = false
 
     private var project: Project? { model.project }
     private var zooms: [ZoomSegment] { project?.zooms.sorted { $0.range.start < $1.range.start } ?? [] }
@@ -10,15 +11,9 @@ struct ZoomInspector: View {
 
     var body: some View {
         if project?.mockup.isEnabled == true {
-            SCPanel(padding: 12) {
-                HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: "iphone").foregroundStyle(Palette.trackCamera)
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("The 3D phone is on: camera shots frame the action instead of flat zooms. Auto camera turns these zooms into close-ups.")
-                            .font(Typo.label).foregroundStyle(Palette.textSecondary).fixedSize(horizontal: false, vertical: true)
-                        Button("Auto camera", systemImage: "wand.and.stars") { model.autoCamera() }
-                            .buttonStyle(.sc(.secondary, size: .small))
-                    }
+            VStack(alignment: .leading, spacing: 10) {
+                SCSectionHeader("3D phone is on", info: "Camera shots frame the action instead of flat zooms. Auto camera turns these zooms into close-ups.") {
+                    AutoCameraButton(model: model)
                 }
             }
         }
@@ -27,7 +22,7 @@ struct ZoomInspector: View {
         }
         VStack(alignment: .leading, spacing: 10) {
             SCSectionHeader("Framing")
-            Toggle("Keep zooms inside recording", isOn: Binding(
+            Toggle(isOn: Binding(
                 get: { project?.autoZoom.staysInRecording ?? true },
                 set: { on in
                     model.update(on ? "Keep Zooms Inside Recording" : "Center Zooms on Focus") { p in
@@ -35,21 +30,18 @@ struct ZoomInspector: View {
                         for i in p.zooms.indices { p.zooms[i].staysInRecording = on }
                     }
                 }
-            ))
+            )) {
+                SCInfoLabel("Keep zooms inside recording",
+                            info: "Turn off to center zooms on the cursor even near the edge, showing the background around the recording.")
+            }
             .toggleStyle(.scSwitch)
-            Text("Turn off to center zooms on the cursor even near the edge, showing the background around the recording.")
-                .font(Typo.label).foregroundStyle(Palette.textTertiary)
-                .fixedSize(horizontal: false, vertical: true)
         }
 
         VStack(alignment: .leading, spacing: 14) {
-            SCSectionHeader("Auto zoom") {
+            SCSectionHeader("Auto zoom", info: hasTelemetry
+                ? "Places zooms where you click and type. Zooms you add or edit by hand are kept."
+                : "Automatic zooms need cursor data, which imported videos don't have. Add zooms by hand with + Zoom.") {
                 SCBadge(text: "\(zooms.filter { $0.origin == .auto }.count) auto · \(zooms.filter { $0.origin == .manual }.count) manual")
-            }
-            if !hasTelemetry {
-                Text("Automatic zooms need cursor data, which imported videos don't have. Add zooms by hand with + Zoom.")
-                    .font(Typo.label).foregroundStyle(Palette.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
             Toggle("Place zooms automatically", isOn: Binding(
                 get: { project?.autoZoom.enabled ?? false },
@@ -68,9 +60,16 @@ struct ZoomInspector: View {
                     in: 0...1, defaultValue: 0.5,
                     format: { $0 < 0.34 ? "Calm" : $0 < 0.67 ? "Balanced" : "Eager" }
                 )
-                Button("Regenerate", systemImage: "wand.and.stars") { model.regenerateAutoZooms() }
-                    .buttonStyle(.sc(.secondary, size: .small))
-                    .help("Re-place automatic zooms. Zooms you added or edited by hand are kept.")
+                Button("Regenerate", systemImage: "wand.and.stars") {
+                    if zooms.contains(where: { $0.origin == .auto }) { confirmingRegenerate = true } else { model.regenerateAutoZooms() }
+                }
+                .buttonStyle(.sc(.secondary, size: .small))
+                .alert("Replace automatic zooms?", isPresented: $confirmingRegenerate) {
+                    Button("Replace", role: .destructive) { model.regenerateAutoZooms() }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("Automatic zooms are placed again. Zooms you added or edited by hand are kept. You can undo with ⌘Z.")
+                }
             }
             .disabled(!(project?.autoZoom.enabled ?? false))
         }
@@ -92,11 +91,9 @@ struct ZoomInspector: View {
         }
 
         VStack(alignment: .leading, spacing: 8) {
-            SCSectionHeader("Zooms")
+            SCSectionHeader("Zooms", info: "Press Z or + Zoom to add one at the playhead. Drag them on the timeline to move or resize.")
             if zooms.isEmpty {
-                Text("No zooms yet. Use + Zoom below the canvas to add one at the playhead.")
-                    .font(Typo.label).foregroundStyle(Palette.textTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
+                Text("No zooms yet").font(Typo.label).foregroundStyle(Palette.textTertiary)
             }
             ForEach(zooms) { zoom in
                 ZoomRow(zoom: zoom, isActive: model.selectedZooms.contains(zoom.id)) {
@@ -237,12 +234,13 @@ private struct SelectedZoomPanel: View {
                      format: { String(format: "%.2f s", $0) })
             SCSlider(title: "Zoom out", value: value(\.transitionOut, "Change Zoom Out"), in: 0...2, defaultValue: 0.8,
                      format: { String(format: "%.2f s", $0) })
-            Toggle("Keep inside recording", isOn: Binding(
+            Toggle(isOn: Binding(
                 get: { zoom.staysInRecording },
                 set: { on in model.updateSelectedZooms(on ? "Keep Zoom Inside Recording" : "Center Zoom on Focus") { $0.staysInRecording = on } }
-            ))
+            )) {
+                SCInfoLabel("Keep inside recording", info: "Off: the zoom centers on its focus and can show the background around the recording.")
+            }
             .toggleStyle(.scSwitch)
-            .help("Off: the zoom centers on its focus and can show the background around the recording.")
             Button(count == 1 ? "Delete Zoom" : "Delete \(count) Zooms", systemImage: "trash") { model.deleteSelection() }
                 .buttonStyle(.sc(.destructive, size: .small))
         }

@@ -104,11 +104,12 @@ public final class ScreenCaptureEngine: NSObject, RecordingEngine, @unchecked Se
 
         if let cameraID = settings.cameraID {
             camera = try? CameraRecorder(deviceID: cameraID, packageURL: packageURL, clock: clock)
+            // Wake the webcam first: its frames are dropped until the screen starts the clock.
+            await camera?.start()
         }
         telemetry.start()
         do {
             try await stream.startCapture()
-            camera?.start()
         } catch {
             _ = telemetry.stop()
             camera?.cancel()

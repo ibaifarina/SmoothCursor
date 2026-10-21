@@ -173,16 +173,15 @@ struct VideoLane: View {
                           selected: model.selectedClip == index, width: width)
                     .frame(width: width, height: TimelineMetrics.videoHeight)
                     .contentShape(.rect)
-                    .onTapGesture {
-                        model.selectedZooms = []
-                        model.selectedClip = index
-                    }
+                    .onTapGesture { model.select(clip: index) }
                     .overlay(alignment: .leading) { trimHandle(index, .start) }
                     .overlay(alignment: .trailing) { trimHandle(index, .end) }
                     .contextMenu {
                         Button("Split at Playhead") { model.splitAtPlayhead() }
+                        Button("Remove Idle Parts") { model.trimIdle() }
+                        Divider()
                         Button("Delete Clip", role: .destructive) {
-                            model.selectedClip = index
+                            model.select(clip: index)
                             model.deleteSelection()
                         }
                         .disabled(clips.count < 2)
@@ -303,17 +302,16 @@ struct CameraLane: View {
                 .offset(x: metrics.x(0))
                 .contentShape(.rect)
                 .onTapGesture(count: 2, coordinateSpace: .named(TimelineMetrics.space)) { p in
-                    if !project.mockup.isEnabled { model.setMockup(.phone) }
                     model.addShot(at: metrics.time(p.x))
                 }
                 .onTapGesture(count: 1, coordinateSpace: .named(TimelineMetrics.space)) { p in
                     model.clearSelection()
                     model.playback?.seek(to: metrics.time(p.x))
                 }
-                .help(project.mockup.isEnabled ? "Double-click to add a camera shot" : "Camera shots move the 3D phone. Double-click to add one.")
+                .help("Double-click to add a camera shot")
             ForEach(project.cameraClips) { clip in
                 let width = max(CGFloat(clip.range.duration) * metrics.pps, 8)
-                ShotBlock(clip: clip, selected: model.selectedShots.contains(clip.id), width: width, active: project.mockup.isEnabled)
+                ShotBlock(clip: clip, selected: model.selectedShots.contains(clip.id), width: width)
                     .frame(width: width, height: TimelineMetrics.cameraHeight)
                     .contentShape(.rect)
                     .onTapGesture(count: 2) { model.playback?.seek(to: clip.range.start) }
@@ -351,8 +349,7 @@ struct CameraLane: View {
                 let ids = model.selectedShots
                 var delta = Double(g.translation.width / metrics.pps)
                 if !snappingDisabled {
-                    var candidates = snapCandidates(project: project, playhead: model.playheadTime)
-                    for c in snap where !ids.contains(c.id) { candidates += [c.range.start, c.range.end] }
+                    let candidates = snapCandidates(project: project, playhead: model.playheadTime, excluding: ids)
                     delta = Snapping.snapDelta(range: original.range, delta: delta, candidates: candidates, threshold: metrics.snapThreshold)
                 }
                 let moved = TimelineEdits.move(snap, ids: ids, by: delta, duration: metrics.duration)
@@ -376,9 +373,8 @@ struct CameraLane: View {
                         guard let snap = snapshot, let original = snap.first(where: { $0.id == clip.id }) else { return }
                         var t = (edge == .start ? original.range.start : original.range.end) + Double(g.translation.width / metrics.pps)
                         if !snappingDisabled {
-                            var candidates = snapCandidates(project: project, playhead: model.playheadTime)
-                            for c in snap where c.id != clip.id { candidates += [c.range.start, c.range.end] }
-                            t = Snapping.snap(t, to: candidates, threshold: metrics.snapThreshold)
+                            t = Snapping.snap(t, to: snapCandidates(project: project, playhead: model.playheadTime, excluding: [clip.id]),
+                                              threshold: metrics.snapThreshold)
                         }
                         let resized = TimelineEdits.resize(snap, id: clip.id, edge: edge, to: t, duration: metrics.duration)
                         model.update("Resize Shot", coalesce: true) { $0.cameraClips = resized }
@@ -392,7 +388,7 @@ private struct ShotBlock: View {
     let clip: CameraClip
     let selected: Bool
     let width: CGFloat
-    let active: Bool
+    @State private var hovering = false
 
     var body: some View {
         let tint = Palette.trackCamera
@@ -401,10 +397,136 @@ private struct ShotBlock: View {
             if width > 70 { Text(clip.preset.label).lineLimit(1) }
         }
         .font(.system(size: 10.5, weight: .semibold))
-        .foregroundStyle(.white.opacity(active ? 0.95 : 0.5))
+        .foregroundStyle(.white.opacity(0.95))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(tint.opacity(selected ? 0.85 : active ? 0.5 : 0.22), in: .rect(cornerRadius: Radius.s))
-        .overlay(RoundedRectangle(cornerRadius: Radius.s).strokeBorder(selected ? Color.white : tint.opacity(active ? 0.95 : 0.4), lineWidth: selected ? 1.5 : 1))
+        .background(tint.opacity(selected ? 0.85 : hovering ? 0.65 : 0.5), in: .rect(cornerRadius: Radius.s))
+        .overlay(RoundedRectangle(cornerRadius: Radius.s).strokeBorder(selected ? Color.white : tint.opacity(0.95), lineWidth: selected ? 1.5 : 1))
+        .onHover { hovering = $0 }
+    }
+}
+
+// MARK: - Blur lane
+
+struct BlurLane: View {
+    @Bindable var model: EditorModel
+    let project: Project
+    let metrics: TimelineMetrics
+    @State private var snapshot: [RedactRegion]?
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            LaneBackground()
+                .frame(width: metrics.x(metrics.duration) - metrics.x(0))
+                .offset(x: metrics.x(0))
+                .contentShape(.rect)
+                .onTapGesture(count: 2, coordinateSpace: .named(TimelineMetrics.space)) { p in
+                    guard !project.mockup.isEnabled else { return }
+                    model.playback?.seek(to: metrics.time(p.x))
+                    if !model.isDrawingRedaction { model.toggleBlurDrawing() }
+                }
+                .onTapGesture(count: 1, coordinateSpace: .named(TimelineMetrics.space)) { p in
+                    model.clearSelection()
+                    model.playback?.seek(to: metrics.time(p.x))
+                }
+                .help(project.mockup.isEnabled ? "" : "Double-click to add a blur region here")
+            ForEach(project.redactions) { region in
+                let width = max(CGFloat(region.range.duration) * metrics.pps, 8)
+                BlurBlock(region: region, selected: model.selectedBlurs.contains(region.id), width: width)
+                    .frame(width: width, height: TimelineMetrics.blurHeight)
+                    .contentShape(.rect)
+                    .onTapGesture(count: 2) { model.playback?.seek(to: region.range.start) }
+                    .onTapGesture { model.select(blur: region.id, extend: extendingSelection) }
+                    .gesture(moveGesture(region))
+                    .pointerStyle(.grabIdle)
+                    .overlay(alignment: .leading) { handle(region, .start) }
+                    .overlay(alignment: .trailing) { handle(region, .end) }
+                    .contextMenu {
+                        Button("Blur") {
+                            model.select(blur: region.id)
+                            model.updateSelectedBlurs("Change Blur Style") { $0.style = .blur }
+                        }
+                        Button("Pixelate") {
+                            model.select(blur: region.id)
+                            model.updateSelectedBlurs("Change Blur Style") { $0.style = .pixelate }
+                        }
+                        Divider()
+                        Button("Delete Blur Region", role: .destructive) {
+                            model.select(blur: region.id)
+                            model.deleteSelection()
+                        }
+                    }
+                    .offset(x: metrics.x(region.range.start))
+            }
+        }
+    }
+
+    private func moveGesture(_ region: RedactRegion) -> some Gesture {
+        DragGesture(minimumDistance: 3, coordinateSpace: .named(TimelineMetrics.space))
+            .onChanged { g in
+                if snapshot == nil {
+                    snapshot = project.redactions
+                    if !model.selectedBlurs.contains(region.id) { model.select(blur: region.id, extend: extendingSelection) }
+                }
+                guard let snap = snapshot, let original = snap.first(where: { $0.id == region.id }) else { return }
+                let ids = model.selectedBlurs
+                var delta = Double(g.translation.width / metrics.pps)
+                if !snappingDisabled {
+                    let candidates = snapCandidates(project: project, playhead: model.playheadTime, excluding: ids)
+                    delta = Snapping.snapDelta(range: original.range, delta: delta, candidates: candidates, threshold: metrics.snapThreshold)
+                }
+                let moved = TimelineEdits.move(snap, ids: ids, by: delta, duration: metrics.duration)
+                model.update("Move Blur Region", coalesce: true) { $0.redactions = moved }
+            }
+            .onEnded { _ in snapshot = nil }
+    }
+
+    private func handle(_ region: RedactRegion, _ edge: TimelineEdits.Edge) -> some View {
+        Color.clear
+            .frame(width: 8)
+            .contentShape(.rect)
+            .pointerStyle(.frameResize(position: edge == .start ? .leading : .trailing))
+            .gesture(
+                DragGesture(minimumDistance: 1, coordinateSpace: .named(TimelineMetrics.space))
+                    .onChanged { g in
+                        if snapshot == nil {
+                            snapshot = project.redactions
+                            model.select(blur: region.id)
+                        }
+                        guard let snap = snapshot, let original = snap.first(where: { $0.id == region.id }) else { return }
+                        var t = (edge == .start ? original.range.start : original.range.end) + Double(g.translation.width / metrics.pps)
+                        if !snappingDisabled {
+                            t = Snapping.snap(t, to: snapCandidates(project: project, playhead: model.playheadTime, excluding: [region.id]),
+                                              threshold: metrics.snapThreshold)
+                        }
+                        let resized = TimelineEdits.resize(snap, id: region.id, edge: edge, to: t, duration: metrics.duration)
+                        model.update("Resize Blur Region", coalesce: true) { $0.redactions = resized }
+                        model.playback?.seek(to: t)
+                    }
+                    .onEnded { _ in snapshot = nil }
+            )
+    }
+}
+
+private struct BlurBlock: View {
+    let region: RedactRegion
+    let selected: Bool
+    let width: CGFloat
+    @State private var hovering = false
+
+    var body: some View {
+        let tint = Palette.trackBlur
+        HStack(spacing: 5) {
+            if width > 36 {
+                Image(systemName: region.style == .blur ? "drop.halffull" : "squareshape.split.3x3").font(.system(size: 9, weight: .bold))
+            }
+            if width > 80 { Text(region.style == .blur ? "Blur" : "Pixelate").lineLimit(1) }
+        }
+        .font(.system(size: 10.5, weight: .semibold))
+        .foregroundStyle(.white.opacity(0.95))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(tint.opacity(selected ? 0.85 : hovering ? 0.65 : 0.5), in: .rect(cornerRadius: Radius.s))
+        .overlay(RoundedRectangle(cornerRadius: Radius.s).strokeBorder(selected ? Color.white : tint.opacity(0.95), lineWidth: selected ? 1.5 : 1))
+        .onHover { hovering = $0 }
     }
 }
 

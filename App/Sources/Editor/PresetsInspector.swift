@@ -15,7 +15,7 @@ struct PresetsInspector: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            SCSectionHeader("Presets") {
+            SCSectionHeader("Presets", info: "Save this project's settings to reuse them on other recordings. The default preset is applied to every new recording.") {
                 if !naming {
                     Button("New", systemImage: "plus") {
                         name = "Preset \(store.presets.count + 1)"
@@ -29,9 +29,7 @@ struct PresetsInspector: View {
             if naming {
                 saveForm
             } else if store.presets.isEmpty {
-                Text("Save this project's settings to reuse them on other recordings. The default preset is applied to every new recording.")
-                    .font(Typo.label).foregroundStyle(Palette.textTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
+                Text("No presets yet").font(Typo.label).foregroundStyle(Palette.textTertiary)
             }
             if let applied {
                 Text("Applied “\(applied)”. ⌘Z to undo.").font(Typo.label).foregroundStyle(Palette.textSecondary)

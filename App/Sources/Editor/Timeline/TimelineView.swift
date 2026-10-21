@@ -11,7 +11,8 @@ struct TimelineMetrics {
     static let videoHeight: CGFloat = 34
     static let zoomHeight: CGFloat = 34
     static let audioHeight: CGFloat = 38
-    static let cameraHeight: CGFloat = 26
+    static let cameraHeight: CGFloat = 34
+    static let blurHeight: CGFloat = 26
     static let space = "timeline"
 
     let pps: CGFloat
@@ -102,16 +103,29 @@ private struct TrackHeaders: View {
             }
             .frame(height: TimelineMetrics.rulerHeight)
             .padding(.leading, 8)
-            header("Video", "film", TimelineMetrics.videoHeight)
-            HStack(spacing: 6) {
-                header("Zoom", "plus.magnifyingglass", TimelineMetrics.zoomHeight)
-                    .opacity(model.project?.mockup.isEnabled == true ? 0.45 : 1)
-                if model.project?.mockup.isEnabled == true {
-                    SCBadge(text: "Off").help("Zooms are paused while the 3D phone is on")
+            header("Video", "film", TimelineMetrics.videoHeight) { EmptyView() }
+            if model.showsShots {
+                header("Camera", "video", TimelineMetrics.cameraHeight) {
+                    AddShotButton(model: model, compact: true)
+                }
+            } else {
+                header("Zoom", "plus.magnifyingglass", TimelineMetrics.zoomHeight) {
+                    Button("Add zoom", systemImage: "plus") { model.addZoomAtPlayhead() }
+                        .buttonStyle(.scIcon(size: 22))
+                        .help(model.canAddZoom ? "Add a zoom at the playhead (Z)" : "The playhead is inside a zoom")
+                        .disabled(!model.canAddZoom)
                 }
             }
-            header("Audio", "waveform", TimelineMetrics.audioHeight)
-            header("Camera", "video", TimelineMetrics.cameraHeight)
+            header("Blur", "drop.halffull", TimelineMetrics.blurHeight) {
+                Button("Add blur", systemImage: model.isDrawingRedaction ? "xmark" : "plus") { model.toggleBlurDrawing() }
+                    .buttonStyle(.scIcon(size: 22, active: model.isDrawingRedaction))
+                    .help(model.showsShots ? "Switch the device to Flat to draw a new blur region"
+                        : model.isDrawingRedaction ? "Cancel" : "Add a blur region: drag over the video to hide private details (B)")
+                    .disabled(model.showsShots)
+            }
+            header("Audio", "waveform", TimelineMetrics.audioHeight) {
+                AudioSettingsButton(model: model)
+            }
         }
         .padding(.top, 6)
         .frame(maxHeight: .infinity, alignment: .top)
@@ -119,13 +133,20 @@ private struct TrackHeaders: View {
         .onTapGesture { model.clearSelection() }
     }
 
-    private func header(_ title: String, _ icon: String, _ height: CGFloat) -> some View {
-        Label(title, systemImage: icon)
-            .labelStyle(SCLabelStyle())
-            .font(Typo.label)
-            .foregroundStyle(Palette.textSecondary)
-            .padding(.leading, 14)
-            .frame(height: height)
+    private func header(_ title: String, _ icon: String, _ height: CGFloat, @ViewBuilder accessory: () -> some View) -> some View {
+        HStack(spacing: 4) {
+            Label(title, systemImage: icon)
+                .labelStyle(SCLabelStyle())
+                .font(Typo.label)
+                .foregroundStyle(Palette.textSecondary)
+                .lineLimit(1)
+                .fixedSize()
+            Spacer(minLength: 0)
+            accessory()
+        }
+        .padding(.leading, 12)
+        .padding(.trailing, 6)
+        .frame(height: height)
     }
 }
 
@@ -141,15 +162,17 @@ private struct TimelineContent: View {
                 .frame(height: TimelineMetrics.rulerHeight)
             VideoLane(model: model, project: project, metrics: metrics)
                 .frame(height: TimelineMetrics.videoHeight)
-            ZoomLane(model: model, project: project, metrics: metrics)
-                .frame(height: TimelineMetrics.zoomHeight)
-                .opacity(project.mockup.isEnabled ? 0.3 : 1)
-                .allowsHitTesting(!project.mockup.isEnabled)
-                .help(project.mockup.isEnabled ? "Zooms are paused while the 3D phone is on" : "")
+            if project.mockup.isEnabled {
+                CameraLane(model: model, project: project, metrics: metrics)
+                    .frame(height: TimelineMetrics.cameraHeight)
+            } else {
+                ZoomLane(model: model, project: project, metrics: metrics)
+                    .frame(height: TimelineMetrics.zoomHeight)
+            }
+            BlurLane(model: model, project: project, metrics: metrics)
+                .frame(height: TimelineMetrics.blurHeight)
             AudioLane(peaks: model.waveform, kept: Cuts.kept(project), metrics: metrics)
                 .frame(height: TimelineMetrics.audioHeight)
-            CameraLane(model: model, project: project, metrics: metrics)
-                .frame(height: TimelineMetrics.cameraHeight)
         }
         .padding(.top, 6)
         .frame(maxHeight: .infinity, alignment: .top)
@@ -177,6 +200,8 @@ func tickStep(pps: CGFloat) -> (major: Double, minor: Double) {
 }
 
 func timelineLabel(_ t: Double, step: Double) -> String {
+    // Tick times accumulate float error (0.9999…); round to tenths first.
+    let t = (t * 10).rounded() / 10
     let m = Int(t) / 60, s = Int(t) % 60
     if step < 1 { return String(format: "%d:%02d.%d", m, s, Int((t - floor(t)) * 10 + 0.001)) }
     return String(format: "%d:%02d", m, s)
@@ -277,6 +302,8 @@ struct LaneBackground: View {
 func snapCandidates(project: Project, playhead: Seconds, excluding ids: Set<UUID> = []) -> [Seconds] {
     var c: [Seconds] = [0, project.recording.duration, playhead]
     for z in project.zooms where !ids.contains(z.id) { c += [z.range.start, z.range.end] }
+    for s in project.cameraClips where !ids.contains(s.id) { c += [s.range.start, s.range.end] }
+    for b in project.redactions where !ids.contains(b.id) { c += [b.range.start, b.range.end] }
     for r in Cuts.kept(project) { c += [r.start, r.end] }
     return c
 }
