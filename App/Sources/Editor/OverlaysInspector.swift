@@ -337,6 +337,9 @@ struct AudioInspector: View {
                 Toggle("Click sound", isOn: model.binding(\.cursor.clickSound, "Toggle Click Sound", coalesce: false))
                     .toggleStyle(.scSwitch)
                     .disabled(model.telemetry == nil)
+                SCSlider(title: "Click volume", value: model.binding(\.cursor.clickVolume, "Change Click Volume"), in: 0...2,
+                         defaultValue: 1, format: { "\(Int(($0 * 100).rounded()))%" })
+                    .disabled(!(model.project?.cursor.clickSound ?? false) || model.telemetry == nil)
             }
 
             VStack(alignment: .leading, spacing: 10) {

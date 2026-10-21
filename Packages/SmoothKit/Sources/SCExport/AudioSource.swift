@@ -19,11 +19,12 @@ final class AudioSource: @unchecked Sendable {
     private let reader: AVAssetReader?
     private let output: AVAssetReaderAudioMixOutput?
     private let clicks: [Seconds]
+    private let clickGain: Float
     private let synthesizedDuration: Seconds
     private var synthesizedFrames = 0
     private lazy var format: CMAudioFormatDescription? = Self.makeFormat()
 
-    init(tracks: [AVAssetTrack], composition: AVAsset, clicks: [Seconds], volumes: [Double]) throws {
+    init(tracks: [AVAssetTrack], composition: AVAsset, clicks: [Seconds], clickVolume: Double = 1, volumes: [Double]) throws {
         let reader = try AVAssetReader(asset: composition)
         let output = AVAssetReaderAudioMixOutput(audioTracks: tracks, audioSettings: Self.settings)
         let mix = AVMutableAudioMix()
@@ -37,13 +38,15 @@ final class AudioSource: @unchecked Sendable {
         self.reader = reader
         self.output = output
         self.clicks = clicks.sorted()
+        clickGain = Float(max(clickVolume, 0))
         synthesizedDuration = 0
     }
 
-    init(synthesizing duration: Seconds, clicks: [Seconds]) {
+    init(synthesizing duration: Seconds, clicks: [Seconds], clickVolume: Double = 1) {
         reader = nil
         output = nil
         self.clicks = clicks.sorted()
+        clickGain = Float(max(clickVolume, 0))
         synthesizedDuration = duration
     }
 
@@ -81,8 +84,8 @@ final class AudioSource: @unchecked Sendable {
             for (j, v) in Self.click.enumerated() {
                 let i = offset + j
                 guard i >= 0, i < frames else { continue }
-                data[2 * i] += v
-                data[2 * i + 1] += v
+                data[2 * i] += v * clickGain
+                data[2 * i + 1] += v * clickGain
             }
         }
     }

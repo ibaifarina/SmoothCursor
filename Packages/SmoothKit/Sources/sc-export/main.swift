@@ -13,6 +13,7 @@ if let h = value("--height").flatMap(Int.init) { project.export.height = h }
 if let f = value("--fps").flatMap(Int.init) { project.export.fps = f }
 if args.contains("--gif") { project.export.format = .gif }
 if args.contains("--clicks") { project.cursor.clickSound = true }
+if let v = value("--click-volume").flatMap(Double.init) { project.cursor.clickVolume = v }
 if let c = value("--crop")?.split(separator: ",").compactMap({ Double($0) }), c.count == 4 {
     project.canvas.crop = UnitRect(x: c[0], y: c[1], width: c[2], height: c[3])
 }

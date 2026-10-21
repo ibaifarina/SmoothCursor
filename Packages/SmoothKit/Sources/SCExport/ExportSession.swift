@@ -196,11 +196,12 @@ public final class ExportSession: @unchecked Sendable {
         writer.add(videoInput)
 
         let clicks = clickTimes(kept: media.kept)
+        let clickVolume = project.cursor.clickVolume * project.audio.master
         let audioSource: AudioSource? = if !media.audio.isEmpty {
-            try AudioSource(tracks: media.audio, composition: media.composition, clicks: clicks,
+            try AudioSource(tracks: media.audio, composition: media.composition, clicks: clicks, clickVolume: clickVolume,
                             volumes: media.audio.indices.map { project.audio.volume(track: $0) })
         } else if !clicks.isEmpty {
-            AudioSource(synthesizing: media.duration, clicks: clicks)
+            AudioSource(synthesizing: media.duration, clicks: clicks, clickVolume: clickVolume)
         } else {
             nil
         }

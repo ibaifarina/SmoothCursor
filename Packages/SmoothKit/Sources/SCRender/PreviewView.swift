@@ -155,7 +155,7 @@ public final class PreviewView: NSView {
         player.prepare()
         guard let last = lastClickTime, time > last, time - last < 0.25 else { return }
         if cursorTrack.clicks.contains(where: { $0.time > last && $0.time <= time }) {
-            player.play(volume: project.audio.master)
+            player.play(volume: project.cursor.clickVolume * project.audio.master)
         }
     }
 

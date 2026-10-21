@@ -30,7 +30,7 @@ final class ClickPlayer {
     func play(volume: Double) {
         prepare()
         guard let buffer, engine.isRunning else { return }
-        player.volume = Float(min(max(volume, 0), 2))
+        player.volume = Float(min(max(volume, 0), 4))
         player.scheduleBuffer(buffer, at: nil, options: [])
     }
 

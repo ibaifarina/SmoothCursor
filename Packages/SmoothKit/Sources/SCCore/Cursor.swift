@@ -22,6 +22,8 @@ public struct CursorSettings: Codable, Hashable, Sendable {
     public var clickEffect: ClickEffect = .ripple
     public var clickEffectColor = RGBAColor(1, 1, 1, 0.6)
     public var clickSound = false
+    /// Click sound level, 0...2 (1 = as recorded).
+    public var clickVolume = 1.0
     /// Rotate the arrow slightly in the direction of motion.
     public var tiltWithMotion = true
     public init() {}

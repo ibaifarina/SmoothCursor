@@ -89,7 +89,10 @@ struct CursorInspector: View {
             )
             Toggle("Click sound", isOn: model.binding(\.cursor.clickSound, "Toggle Click Sound", coalesce: false))
                 .toggleStyle(.scSwitch)
-                .help("Adds a soft click to the exported audio on every click")
+                .help("Plays a mouse click sound on every click, in the preview and the export")
+            SCSlider(title: "Click volume", value: model.binding(\.cursor.clickVolume, "Change Click Volume"), in: 0...2,
+                     defaultValue: 1, format: { "\(Int(($0 * 100).rounded()))%" })
+                .disabled(!cursor.clickSound)
             if cursor.clickEffect == .ripple || cursor.clickEffect == .pulse {
                 HStack(spacing: 8) {
                     Text("Color").font(Typo.label).foregroundStyle(Palette.textSecondary)
